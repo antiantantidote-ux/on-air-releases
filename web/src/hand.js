@@ -158,7 +158,7 @@ export function createHand(scene, terrain, entities, input, fx) {
   }
   hand.drop = () => release(true);
 
-  hand.update = (dt, pad, rig, enabled) => {
+  hand.update = (dt, pad, rig, enabled, canGrab = true) => {
     // --- movement -----------------------------------------------------------------
     hand.precision = enabled && pad.down.l2;
     if (enabled) {
@@ -180,7 +180,7 @@ export function createHand(scene, terrain, entities, input, fx) {
     hand.hover = hand.mode === 'open' ? entities.nearest(hand.pos.x, hand.pos.z, hand.precision ? 2.2 : 3.4) : null;
 
     // --- R2 grab state machine --------------------------------------------------------
-    if (enabled) {
+    if (enabled && (canGrab || hand.mode !== 'open')) {
       if (hand.mode === 'open' && pad.pressed.r2 && hand.hover) {
         candidate = hand.hover;
         hand.mode = 'reach';

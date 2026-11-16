@@ -77,14 +77,22 @@ await axes(0, 0, 1, -1); await wait(500); await axes(0, 0, 0, 0);
 const c1 = await game(() => [window.__game.rig.yaw, window.__game.rig.pitch]);
 check('right stick orbits + pitches camera', Math.abs(c1[0] - c0[0]) > 0.3 && Math.abs(c1[1] - c0[1]) > 0.1);
 
-// L1 wheel: deliver a crate (item 0 is straight up).
+// L1 wheel -> Requisition (item 3 of 6, straight down) -> Sugar Crate (item 0, up).
+await game(() => { // stand on open ground so the delivery doesn't land on a building
+  const g = window.__game, s = g.buildings.findSpot('tenement', 18, 34, 24);
+  g.hand.teleport(s.x, s.z); g.rig.snapTo(s.x, s.z);
+});
 await press(B.l1); await wait(250);
 check('L1 opens radial wheel', await game(() => window.__game.radial.isOpen));
-await axes(0, 0, 0, -1); await wait(150);
+await axes(0, 0, 0, 1); await wait(150);
 await shot('03-wheel-l1');
+await tap(B.cross);
+await axes(0, 0, 0, -1); await wait(150);
 const crates0 = await game(() => window.__game.entities.count('crate'));
+const pesos0 = await game(() => window.__game.society.pesos);
 await tap(B.cross); await axes(0, 0, 0, 0); await press(B.l1, false); await wait(200);
 check('Cross confirms wheel item (crate delivered)', (await game(() => window.__game.entities.count('crate'))) === crates0 + 1);
+check('requisition costs pesos', (await game(() => window.__game.society.pesos)) === pesos0 - 120);
 check('wheel closes after choice', !(await game(() => window.__game.radial.isOpen)));
 await wait(2500); // let it land
 
@@ -105,7 +113,11 @@ check('throw distance recorded', await game(() => window.__game.hand.stats.longe
 check('rumble fired', (await game(() => window.__rumbles || 0)) > 0);
 
 // Tap-to-latch on a citizen, Square inspect, Circle to set down.
-await game(() => { const g = window.__game, c = g.entities.lists.citizen[0]; g.hand.teleport(c.pos.x, c.pos.z); });
+await game(() => { // pick an islander who is outdoors and make them hold still
+  const g = window.__game, c = g.entities.lists.citizen.find((c) => !c.hidden && (c.state === 'walk' || c.state === 'idle'));
+  c.state = 'siesta'; c.timer = 60;
+  g.hand.teleport(c.pos.x, c.pos.z);
+});
 await wait(150);
 await tap(B.r2, 2); await wait(300);
 check('R2 tap latches', await game(() => window.__game.hand.held && window.__game.hand.held.type === 'citizen'));
@@ -117,7 +129,8 @@ check('Circle closes inspect', await game(() => document.getElementById('inspect
 await tap(B.circle);
 check('Circle sets held object down', await game(() => !window.__game.hand.held));
 
-// R1 wheel -> Move the Sun (sub-wheel) -> Dusk.
+// R1 wheel -> Move the Sun (sub-wheel) -> Dusk. Miracles cost Mana.
+await game(() => { window.__game.society.mana = 100; });
 await press(B.r1); await wait(200);
 await axes(0, 0, 0, -1); await wait(120); await tap(B.cross);      // "Move the Sun" (item 0)
 await axes(0, 0, -1, 0); await wait(150);                           // 4 items: left = index 3 (Midnight)
@@ -134,6 +147,7 @@ check('Triangle snaps to Palace', await game(() => Math.hypot(window.__game.hand
 await press(B.r1); await wait(200); await axes(0, 0, 1, 0); await wait(150); await tap(B.cross);
 await axes(0, 0, 0, 0); await press(B.r1, false); await wait(500);
 check('Tremor miracle fired', await game(() => window.__game.stats.miracles === 2));
+check('miracles spend Mana (15 + 30)', Math.abs((await game(() => window.__game.society.mana)) - 55) < 3);
 await shot('10-tremor');
 await tap(B.triangle);
 check('Triangle toggles to the Nest', await game(() => window.__game.hand.pos.x < -30));
@@ -151,6 +165,104 @@ check('D-pad Down cycles advisor alerts', await game(() => !document.getElementB
 await tap(B.options); await wait(700);
 check('Options opens Almanac', await game(() => !document.getElementById('almanac').hidden));
 await shot('12-almanac');
+await tap(B.options);
+
+// ---------------------------------------------------------------------------------
+// Phase 2: building, economy, citizens
+// ---------------------------------------------------------------------------------
+check('starter town exists', (await game(() => window.__game.buildings.list.filter((b) => b.built).length)) === 4);
+check('HUD shows treasury', (await game(() => document.getElementById('pesos').textContent)).includes('$'));
+
+// L1 -> Farms (item 0, up) -> Sugar Plantation (item 1 of 4, right) -> blueprint mode.
+await press(B.l1); await wait(200);
+await axes(0, 0, 0, -1); await wait(150); await tap(B.cross);
+await axes(0, 0, 1, 0); await wait(150);
+await shot('14-wheel-farms');
+await tap(B.cross); await axes(0, 0, 0, 0); await press(B.l1, false); await wait(200);
+check('choosing a building enters blueprint mode', await game(() => window.__game.mode && window.__game.mode.type === 'sugar'));
+
+// Over the sea the blueprint is refused.
+await game(() => { const g = window.__game; g.hand.teleport(150, 0); });
+await wait(150);
+const before = await game(() => window.__game.buildings.list.length);
+await tap(B.cross);
+check('invalid site refused', (await game(() => window.__game.buildings.list.length)) === before && await game(() => !!window.__game.mode));
+
+// Move to legal ground, rotate with Square, build with Cross.
+await game(() => {
+  const g = window.__game, s = g.buildings.findSpot('sugar', 18, 34, 30);
+  g.hand.teleport(s.x, s.z); g.rig.snapTo(s.x, s.z);
+});
+await wait(150);
+await tap(B.square);
+check('Square rotates the blueprint', Math.abs((await game(() => window.__game.mode.rot)) - Math.PI / 4) < 1e-6);
+await tap(B.square, 2); await game(() => { window.__game.mode.rot = 0; }); await wait(100);
+await shot('15-blueprint');
+const pesos1 = await game(() => window.__game.society.pesos);
+await tap(B.cross);
+check('Cross founds a construction site', (await game(() => window.__game.buildings.list.length)) === before + 1);
+check('construction costs pesos', (await game(() => window.__game.society.pesos)) === pesos1 - 500);
+check('blueprint mode ends after building', await game(() => !window.__game.mode));
+await wait(300);
+await shot('16-site');
+
+// A crate dropped on the site adds 25%.
+const prog0 = await game(() => window.__game.buildings.list.at(-1).progress);
+await game(() => { const g = window.__game, b = g.buildings.list.at(-1); g.entities.spawn('crate', b.x, b.y + 6, b.z); });
+await game(() => window.__game.fastForward(3));
+const prog1 = await game(() => window.__game.buildings.list.at(-1).progress);
+check('crate dropped on site rushes construction', prog1 - prog0 > 0.24, `${Math.round(prog0 * 100)}% -> ${Math.round(prog1 * 100)}%`);
+
+// Builders finish it, workers are hired, sugar is grown, hauled and exported.
+await game(() => window.__game.fastForward(90));
+check('site completes', await game(() => window.__game.buildings.list.at(-1).built));
+await wait(200);
+await shot('17-built');
+await game(() => window.__game.fastForward(500));
+const eco = await game(() => {
+  const g = window.__game, b = g.buildings.list.at(-1);
+  return { workers: b.workers.length, made: b.made, exported: g.society.exported, deaths: g.society.deaths, mood: g.society.avg.mood, mana: g.society.mana, food: g.society.avg.food };
+});
+check('plantation is staffed', eco.workers === 3);
+check('plantation produces sugar', eco.made > 5, `${eco.made} units`);
+check('freighter pays for exports', eco.exported > 0, `$${eco.exported}`);
+check('prayer generates Mana', eco.mana > 60, `${Math.round(eco.mana)}`);
+check('nobody starves', eco.deaths === 0 && eco.food > 0.4, `food ${eco.food.toFixed(2)}, mood ${eco.mood.toFixed(2)}`);
+
+// Dropping an islander on a workplace reassigns them.
+check('dropping an islander on a workplace reassigns them', await game(() => {
+  const g = window.__game, farm = g.buildings.list.at(-1);
+  const victim = farm.workers[0], other = g.entities.lists.citizen.find((c) => c.job !== farm && !c.hidden);
+  victim.job = null; farm.workers.shift();
+  other.pos.set(farm.x, farm.y + 4, farm.z); g.entities.launch(other, 0, 0, 0);
+  g.fastForward(3);
+  return other.job === farm;
+}));
+
+// Inspect a building, bless it with Cross (10 Mana).
+await game(() => { const g = window.__game, b = g.buildings.list.at(-1); g.sky.setHour(10); g.hand.teleport(b.x + 4, b.z - 4); g.rig.snapTo(b.x, b.z); g.entities.clearCargo(); });
+await wait(200);
+await tap(B.square);
+check('Square inspects a building', (await game(() => document.getElementById('inspect-title').textContent)) === 'Sugar Plantation');
+await shot('18-inspect-building');
+await tap(B.circle);
+const mana1 = await game(() => window.__game.society.mana);
+await tap(B.cross);
+check('Cross blesses a building for 10 Mana', await game(() => window.__game.buildings.list.at(-1).boost > 0) && Math.abs(mana1 - 10 - await game(() => window.__game.society.mana)) < 2);
+
+// L1 -> Demolish (item 5 of 6, up-left), Cross on the building, Circle to leave the mode.
+await press(B.l1); await wait(200);
+await axes(0, 0, -0.87, -0.5); await wait(150); await tap(B.cross);
+await axes(0, 0, 0, 0); await press(B.l1, false); await wait(200);
+check('Demolish mode entered', await game(() => window.__game.mode && window.__game.mode.kind === 'demolish'));
+const pesos2 = await game(() => window.__game.society.pesos);
+await tap(B.cross);
+check('Cross demolishes with 50% refund', (await game(() => window.__game.buildings.list.length)) === before && (await game(() => window.__game.society.pesos)) === pesos2 + 250);
+await tap(B.circle);
+check('Circle leaves demolish mode', await game(() => !window.__game.mode));
+
+await tap(B.options); await wait(600);
+await shot('19-almanac-economy');
 await tap(B.options);
 
 // Midnight render + budget checks.

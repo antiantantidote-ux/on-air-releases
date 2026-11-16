@@ -85,15 +85,29 @@ export function createHud() {
     if (status) $('title-status').innerHTML = status;
   };
 
-  hud.almanac = (data) => {
-    if (!data) { $('almanac').hidden = true; return; }
+  /** cards: [{ title, stats: [[label, value]], bars: [[label, value, max, color, text]], chart: { values, color, caption } }] */
+  hud.almanac = (cards) => {
+    if (!cards) { $('almanac').hidden = true; return; }
     const stat = ([label, value]) => `<div class="stat"><span>${label}</span><b>${value}</b></div>`;
     const bar = ([label, value, max, color, text]) =>
-      `<div class="bar-row wide"><span>${label}</span><div class="bar"><i style="width:${Math.min(100, Math.round((value / max) * 100))}%;background:${color}"></i></div><b>${text}</b></div>`;
-    $('almanac-island').innerHTML = data.island.map(stat).join('');
-    $('almanac-hand').innerHTML = data.hand.map(stat).join('');
-    $('almanac-engine').innerHTML = data.engine.map(bar).join('');
+      `<div class="bar-row wide"><span>${label}</span><div class="bar"><i style="width:${Math.max(0, Math.min(100, Math.round((value / max) * 100)))}%;background:${color}"></i></div><b>${text}</b></div>`;
+    const chart = (c) => {
+      const v = c.values.length > 1 ? c.values : [0, 0];
+      const lo = Math.min(...v), hi = Math.max(...v), span = hi - lo || 1;
+      const pts = v.map((y, i) => `${((i / (v.length - 1)) * 300).toFixed(1)},${(92 - ((y - lo) / span) * 84).toFixed(1)}`).join(' ');
+      return `<svg class="chart" viewBox="0 0 300 100" preserveAspectRatio="none"><polyline points="0,100 ${pts} 300,100" fill="${c.color}33" stroke="none"/><polyline points="${pts}" fill="none" stroke="${c.color}" stroke-width="3" vector-effect="non-scaling-stroke"/></svg><div class="chart-caption">${c.caption}</div>`;
+    };
+    $('almanac-cards').innerHTML = cards.map((c) =>
+      `<div class="card"><h2>${c.title}</h2>${c.chart ? chart(c.chart) : ''}${(c.bars || []).map(bar).join('')}${(c.stats || []).map(stat).join('')}</div>`).join('');
     $('almanac').hidden = false;
+  };
+
+  hud.setResources = (r) => {
+    $('pesos').textContent = `💰 ${r.pesos < 0 ? '−' : ''}$${Math.abs(Math.round(r.pesos)).toLocaleString('en-US')}`;
+    $('pesos').classList.toggle('paused', r.pesos < 0);
+    $('mana').textContent = `✨ ${Math.floor(r.mana)}/${r.manaCap}`;
+    $('pop').textContent = `👥 ${r.pop}`;
+    $('mood').textContent = `${r.mood > 0.62 ? '😊' : r.mood > 0.42 ? '😐' : '😠'} ${Math.round(r.mood * 100)}%`;
   };
   hud.almanacOpen = () => !$('almanac').hidden;
 

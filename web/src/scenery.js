@@ -102,8 +102,10 @@ export function createScenery(scene, terrain, seed = 7) {
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
   const p = new THREE.Vector3(), s = new THREE.Vector3(), tint = new THREE.Color();
 
+  const groups = [];
   function instanced(geometry, list, name, tilt) {
     const mesh = new THREE.InstancedMesh(geometry, vertexLit, list.length);
+    groups.push({ mesh, list });
     mesh.name = name;
     list.forEach((it, i) => {
       e.set((rand() - 0.5) * tilt, rand() * Math.PI * 2, (rand() - 0.5) * tilt);
@@ -134,5 +136,20 @@ export function createScenery(scene, terrain, seed = 7) {
   nest.position.set(SITES.nest.x, SITES.nest.level - 0.1, SITES.nest.z);
   scene.add(nest);
 
-  return { counts: { palms: palms.length, trees: trees.length, rocks: rocks.length } };
+  /** Bulldoze scenery wherever inside(x, z) is true (construction sites clear their plot). */
+  function clearArea(inside) {
+    let cleared = 0;
+    for (const { mesh, list } of groups) {
+      let dirty = false;
+      list.forEach((it, i) => {
+        if (it.gone || !inside(it.x, it.z)) return;
+        it.gone = true; dirty = true; cleared++;
+        mesh.setMatrixAt(i, m4.makeScale(0, 0, 0));
+      });
+      if (dirty) mesh.instanceMatrix.needsUpdate = true;
+    }
+    return cleared;
+  }
+
+  return { clearArea, counts: { palms: palms.length, trees: trees.length, rocks: rocks.length } };
 }

@@ -4,8 +4,13 @@ A god-game / banana-republic dictator sim for **Android TV**, played entirely wi
 **DualShock 4**. You are the ancient island deity of San Milagro, who has discovered that
 rigged elections scale better than blood sacrifice.
 
-**Status: Phase 1 of 4** — engine, island, water, day/night, the Divine Hand (grab / throw),
-orbit camera, radial-wheel framework, 10-foot HUD.
+**Status: Phase 2 of 4**
+
+- Phase 1 — engine, island, water, day/night, the Divine Hand (grab / throw), orbit camera,
+  radial-wheel framework, 10-foot HUD.
+- Phase 2 — building placement and construction, supply chains (sugar → rum, tobacco →
+  cigars), dock exports by freighter, islanders with five needs and a job/eat/pray/sleep/protest
+  state machine, the Peso and Mana loops, costed miracles and edicts.
 
 ## Stack
 
@@ -37,17 +42,28 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 | Right stick | Orbit (X) / pitch (Y) camera; aims the radial wheels |
 | R2 | Hold = grab, release while moving = throw. Tap = latch in the fist, tap again = let go |
 | L2 (hold) | Precision slow-move (the Hand points) |
-| L1 (hold) | Requisitions & Edicts wheel — ✕ confirm, ○ back |
-| R1 (hold) | Miracles wheel |
-| ✕ | Bless / poke whatever is under the Hand |
-| □ | Inspect citizen, cargo or terrain |
-| ○ | Close card / set down the held object |
+| L1 (hold) | Construction & Edicts wheel (Farms, Industry, Civic, Requisition, Edicts, Demolish) — ✕ confirm, ○ back |
+| R1 (hold) | Miracles wheel (costs Mana) |
+| ✕ | Bless an islander; bless a building (10 Mana: ×2.5 output for 30 s, or +20% construction). In blueprint mode: build |
+| □ | Inspect islander, building, cargo or terrain. In blueprint mode: rotate 45° |
+| ○ | Close card / set down the held object / cancel blueprint or demolish mode |
 | △ | Snap to Palace ↔ Creature's Nest |
 | D-pad | ← pause · ↑ 1× · → 2× · ↓ replay advisor alerts |
 | Options / touchpad click | Almanac del Presidente |
 
 Keyboard mirror for desk debugging: WASD = left stick, arrows = right stick, Space = R2,
 Shift = L2, Q/E = L1/R1, Enter = ✕, F = □, Esc = ○, T = △, 1/2/3/4 = D-pad ←/↑/→/↓, Tab = Options.
+
+## How the economy works
+
+- **Pesos** come from the dock: farm and factory workers haul finished goods there and a
+  freighter buys the lot every 70 seconds or so. Wages and upkeep are paid at midnight.
+- **Mana** comes from prayer — a trickle at the palace, four times faster in a cathedral.
+- **Islanders** need Food, Housing, Healthcare, Liberty and Faith. Hungry ones eat at a
+  plantain farm, sick ones need a clinic, unhappy ones protest at the palace. Grabbing and
+  throwing them costs Liberty.
+- **The Hand is part of the economy**: drop a crate on a building site for +25% progress, drop
+  cargo on the dock to export it, drop an islander on a workplace to give them that job.
 
 ## Code map (`web/src`)
 
@@ -59,7 +75,10 @@ Shift = L2, Q/E = L1/R1, Enter = ✕, F = □, Esc = ○, T = △, 1/2/3/4 = D-p
 | `water.js` | One-draw-call water shader (waves, depth tint, shore foam) |
 | `sky.js` | Day/night cycle, sun/moon light, sky dome, fog |
 | `scenery.js` | Instanced palms / jungle / rocks, palace, nest |
-| `entities.js` | Instanced grabbables + ballistic physics, islander behaviour |
+| `entities.js` | Instanced grabbables + ballistic physics, islander bodies (walking, swimming) |
+| `buildings.js` | Building definitions and models, placement rules, construction, production, freighter |
+| `society.js` | Islander needs and task state machine, jobs, housing, immigration, Peso/Mana ledger |
+| `icons.js` | World-space status icons and progress bars (one instanced draw call) |
 | `hand.js` | The glove, grab/throw state machine, ground decals |
 | `camera.js` | Deadzone-follow orbit rig |
 | `radial.js` | Data-driven radial wheel (sub-wheels supported) |
@@ -74,6 +93,6 @@ the minimum-font-size rule.
 ## Roadmap
 
 1. **Engine, island, camera, DS4 Hand** — done
-2. City building, citizens, Peso/Mana economy
+2. **City building, citizens, Peso/Mana economy** — done
 3. The Creature and its reinforcement learning (the egg in the Nest hatches)
 4. Morality morphing, costed miracles and edicts, factions, advisors

@@ -11,8 +11,12 @@
 
   <div id="ui">
     <header id="topbar">
-      <div class="brand">EL DIOS PRESIDENTE <small>San Milagro</small></div>
+      <div class="brand">EL DIOS PRESIDENTE</div>
       <div class="chips">
+        <div id="pesos" class="chip">💰 $0</div>
+        <div id="mana" class="chip">✨ 0</div>
+        <div id="pop" class="chip">👥 0</div>
+        <div id="mood" class="chip">😊</div>
         <div id="clock" class="chip">☀️ Day 1 · 09:00</div>
         <div id="speed" class="chip">▶ 1×</div>
       </div>
@@ -42,11 +46,7 @@
 
     <section id="almanac" hidden>
       <h1>Almanac del Presidente</h1>
-      <div class="cards">
-        <div class="card"><h2>🏝️ La Isla</h2><div id="almanac-island"></div></div>
-        <div class="card"><h2>🧤 La Mano</h2><div id="almanac-hand"></div></div>
-        <div class="card"><h2>⚙️ El Motor</h2><div id="almanac-engine"></div></div>
-      </div>
+      <div id="almanac-cards" class="cards"></div>
     </section>
 
     <section id="title">

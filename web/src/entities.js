@@ -1,6 +1,8 @@
 // Physical things the Hand can grab: cargo, boulders and islanders. One InstancedMesh
 // per type (4 draw calls total) with a small ballistic physics model: gravity, bounce
 // against the terrain facets, buoyancy, sinking, and islanders who swim home.
+// Islanders' bodies live here (walking, falling, swimming); their minds live in
+// society.js, which plugs in through setBrain().
 import * as THREE from './three.js';
 import { paint, place, merge, vertexLit } from './geo.js';
 import { mulberry32, clamp } from './noise.js';
@@ -69,6 +71,9 @@ export function createEntities(scene, terrain, onEvent) {
   const rand = mulberry32(2024);
   const lists = {}, meshes = {}, dirtyColors = {};
   let nextId = 1;
+  let brain = null;
+  const STEER = [0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9];
+  const ZERO = new THREE.Vector3(0, 0, 0);
 
   for (const type in TYPES) {
     const def = TYPES[type];
@@ -108,8 +113,13 @@ export function createEntities(scene, terrain, onEvent) {
       o.job = JOBS[Math.floor(rand() * JOBS.length)];
       o.tint.set(SHIRTS[Math.floor(rand() * SHIRTS.length)]);
       o.target = new THREE.Vector2(x, z);
-      o.speed = 2.2 + rand() * 1.2;
+      o.speed = 4.2 + rand() * 1.4;
       o.dunkings = 0;
+      o.needs = { food: 0.65 + rand() * 0.35, health: 0.8 + rand() * 0.2, faith: 0.45 + rand() * 0.4 };
+      o.trauma = 0;       // lowers Liberty; earned by being grabbed, thrown or dunked
+      o.home = null; o.job = null; o.task = null; o.carry = null; o.atWork = null;
+      o.hidden = false;   // indoors
+      o.mood = 0.6;
     } else {
       const v = 0.85 + rand() * 0.25;
       o.tint.setRGB(v, v, v);
@@ -185,6 +195,7 @@ export function createEntities(scene, terrain, onEvent) {
         o.vel.set(0, 0, 0); o.spin.set(0, 0, 0);
         if (o.type === 'citizen') { o.state = 'dazed'; o.timer = 1.4 + rand(); }
         else o.state = 'rest';
+        onEvent('settled', o, {});
       }
     }
   }
@@ -195,12 +206,28 @@ export function createEntities(scene, terrain, onEvent) {
         const dx = o.target.x - o.pos.x, dz = o.target.y - o.pos.z;
         const d = Math.hypot(dx, dz);
         o.timer -= dt;
-        if (d < 0.6 || o.timer <= 0) { o.state = 'idle'; o.timer = 1 + rand() * 4; break; }
-        const nx = o.pos.x + (dx / d) * o.speed * dt, nz = o.pos.z + (dz / d) * o.speed * dt;
-        if (terrain.heightAt(nx, nz) < 0.4) { pickTarget(o); break; } // nobody walks into the sea voluntarily
-        o.pos.x = nx; o.pos.z = nz;
-        o.pos.y = terrain.heightAt(nx, nz);
-        o.yaw = Math.atan2(dx, dz);
+        const arrived = d < 0.8;
+        if (arrived || o.timer <= 0) {
+          if (o.task && brain) {
+            if (arrived) { o.state = 'act'; brain.arrive(o); } else brain.abandon(o);
+          } else { o.state = 'idle'; o.timer = 1 + rand() * 4; }
+          break;
+        }
+        // Steer around water: try the direct heading first, then fan out either side.
+        let ux = dx / d, uz = dz / d, clear = d < 3;
+        if (!clear) {
+          for (const a of STEER) {
+            const c = Math.cos(a), s = Math.sin(a);
+            const hx = ux * c - uz * s, hz = ux * s + uz * c;
+            if (terrain.heightAt(o.pos.x + hx * 2.5, o.pos.z + hz * 2.5) > 0.3) { ux = hx; uz = hz; clear = true; break; }
+          }
+        }
+        if (clear) {
+          const step = Math.min(d, o.speed * dt);
+          o.pos.x += ux * step; o.pos.z += uz * step;
+          o.yaw = Math.atan2(ux, uz);
+        }
+        o.pos.y = terrain.heightAt(o.pos.x, o.pos.z);
         yawQuat(o, Math.sin(time * 11 + o.id) * 0.09, qTarget);
         o.quat.rotateTowards(qTarget, dt * 10);
         break;
@@ -209,7 +236,13 @@ export function createEntities(scene, terrain, onEvent) {
         o.timer -= dt;
         o.pos.y = terrain.heightAt(o.pos.x, o.pos.z);
         o.quat.rotateTowards(yawQuat(o, 0, qTarget), dt * 8);
-        if (o.timer <= 0) { pickTarget(o); o.state = 'walk'; o.timer = 20; }
+        if (o.timer <= 0) { if (brain) brain.decide(o); else wander(o); }
+        break;
+      case 'act': // doing whatever society.js told them to do, on the spot
+        if (!o.hidden) o.pos.y = terrain.heightAt(o.pos.x, o.pos.z);
+        if (o.task && o.task.kind === 'sleep' && !o.hidden) o.quat.rotateTowards(yawQuat(o, 0, qTarget).multiply(LYING), dt * 4);
+        else o.quat.rotateTowards(yawQuat(o, o.task && o.task.kind === 'protest' ? Math.sin(time * 9 + o.id) * 0.3 : 0, qTarget), dt * 8);
+        if (brain) brain.act(o, dt, time); else { o.state = 'idle'; o.timer = 1; }
         break;
       case 'dazed': // flat on their back, contemplating the President
         o.timer -= dt;
@@ -270,7 +303,7 @@ export function createEntities(scene, terrain, onEvent) {
     for (const type in lists) {
       const list = lists[type], mesh = meshes[type];
       for (let i = 0; i < list.length; i++) {
-        m4.compose(list[i].pos, list[i].quat, one);
+        m4.compose(list[i].pos, list[i].quat, list[i].hidden ? ZERO : one);
         mesh.setMatrixAt(i, m4);
         if (dirtyColors[type]) mesh.setColorAt(i, list[i].tint);
       }
@@ -285,7 +318,7 @@ export function createEntities(scene, terrain, onEvent) {
     let best = null, bestD = maxDist * maxDist;
     for (const type in lists) {
       for (const o of lists[type]) {
-        if (o.state === 'held' || o.state === 'sink') continue;
+        if (o.state === 'held' || o.state === 'sink' || o.hidden) continue;
         const d = (o.pos.x - x) ** 2 + (o.pos.z - z) ** 2;
         if (d < bestD) { bestD = d; best = o; }
       }
@@ -296,7 +329,7 @@ export function createEntities(scene, terrain, onEvent) {
   function forEachNear(x, z, radius, fn) {
     for (const type in lists) {
       for (const o of lists[type]) {
-        if (o.state === 'held' || o.state === 'sink') continue;
+        if (o.state === 'held' || o.state === 'sink' || o.hidden) continue;
         const d = Math.hypot(o.pos.x - x, o.pos.z - z);
         if (d < radius) fn(o, d);
       }
@@ -327,7 +360,7 @@ export function createEntities(scene, terrain, onEvent) {
   function siesta(seconds) {
     let count = 0;
     for (const o of lists.citizen) {
-      if (o.state === 'walk' || o.state === 'idle') { o.state = 'siesta'; o.timer = seconds * (0.8 + rand() * 0.4); count++; }
+      if ((o.state === 'walk' || o.state === 'idle' || o.state === 'act') && !o.hidden) { o.state = 'siesta'; o.timer = seconds * (0.8 + rand() * 0.4); count++; }
     }
     return count;
   }
@@ -344,8 +377,8 @@ export function createEntities(scene, terrain, onEvent) {
   function populate() {
     const P = SITES.palace;
     let made = 0;
-    for (let k = 0; k < 400 && made < 36; k++) {
-      const a = rand() * Math.PI * 2, d = 10 + rand() * 60;
+    for (let k = 0; k < 400 && made < 26; k++) {
+      const a = rand() * Math.PI * 2, d = 10 + rand() * 30;
       const x = P.x + Math.cos(a) * d, z = P.z + Math.sin(a) * d;
       const h = terrain.heightAt(x, z);
       if (h < 1 || h > 20) continue;
@@ -353,7 +386,7 @@ export function createEntities(scene, terrain, onEvent) {
       c.state = 'idle'; c.timer = rand() * 3;
       made++;
     }
-    const cargo = ['crate', 'crate', 'barrel', 'crate', 'barrel', 'boulder', 'barrel', 'boulder'];
+    const cargo = ['crate', 'crate', 'crate', 'boulder'];
     cargo.forEach((type, i) => {
       const a = 0.5 + (i / cargo.length - 0.5) * 1.5;
       const x = P.x + Math.sin(a) * 13 + (rand() - 0.5) * 2, z = P.z + Math.cos(a) * 13 + (rand() - 0.5) * 2;
@@ -362,7 +395,22 @@ export function createEntities(scene, terrain, onEvent) {
     });
   }
 
+  function wander(o) {
+    pickTarget(o);
+    o.task = null;
+    o.state = 'walk';
+    o.timer = 20;
+  }
+
+  /** Send an islander walking to a point; society.js sets o.task first. */
+  function goTo(o, x, z) {
+    o.target.set(x, z);
+    o.state = 'walk';
+    o.timer = Math.hypot(x - o.pos.x, z - o.pos.z) / o.speed * 1.8 + 8;
+  }
+
   return {
+    wander, goTo, setBrain: (b) => { brain = b; },
     lists, spawn, remove, update, nearest, forEachNear, launch, shockwave, siesta, clearCargo, populate,
     count: (type) => lists[type].length,
   };
