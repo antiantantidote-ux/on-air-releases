@@ -1,0 +1,11 @@
+{
+  "name": "el-dios-presidente",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "God-game / dictator sim for Android TV + DualShock 4. Phase 1: engine, island, Hand.",
+  "scripts": {
+    "dev": "node tools/serve.mjs 8080",
+    "test": "node tools/smoke-test.mjs"
+  }
+}

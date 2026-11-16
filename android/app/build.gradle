@@ -1,0 +1,37 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.sanmilagro.eldiospresidente'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.sanmilagro.eldiospresidente'
+        minSdk 24          // Android TV 7.0+; WebView there is the updatable Chromium one
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0-phase1'
+    }
+
+    // The game itself is the ../web folder, packaged untouched as APK assets.
+    sourceSets {
+        main.assets.srcDirs = ['../../web']
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug   // replace with a real keystore before publishing
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

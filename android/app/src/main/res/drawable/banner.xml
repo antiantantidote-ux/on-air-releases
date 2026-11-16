@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 320x180 leanback launcher banner: sea, sun, island, golden ziggurat. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp" android:height="180dp"
+    android:viewportWidth="320" android:viewportHeight="180">
+    <path android:fillColor="#2B8FE0" android:pathData="M0,0h320v180h-320z" />
+    <path android:fillColor="#FFD34D" android:pathData="M250,45m-26,0a26,26 0,1 1,52 0a26,26 0,1 1,-52 0" />
+    <path android:fillColor="#3FE0D0" android:pathData="M0,120h320v60h-320z" />
+    <path android:fillColor="#F1DFA6" android:pathData="M30,128 Q160,96 290,128 Z" />
+    <path android:fillColor="#2F8A45" android:pathData="M60,122 Q160,60 260,122 Z" />
+    <path android:fillColor="#E8B530" android:pathData="M120,112h80v-12h-10v-12h-10v-12h-10v-12h-20v12h-10v12h-10v12h-10z" />
+    <path android:fillColor="#A3271C" android:pathData="M0,150h320v30h-320z" />
+    <path android:fillColor="#FFF8E7" android:pathData="M40,160h240v6h-240z" />
+</vector>

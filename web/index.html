@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>El Dios Presidente</title>
+  <link rel="stylesheet" href="css/ui.css">
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <div id="ui">
+    <header id="topbar">
+      <div class="brand">EL DIOS PRESIDENTE <small>San Milagro</small></div>
+      <div class="chips">
+        <div id="clock" class="chip">☀️ Day 1 · 09:00</div>
+        <div id="speed" class="chip">▶ 1×</div>
+      </div>
+    </header>
+
+    <div id="advisor" class="advisor" hidden>
+      <div id="advisor-face" class="face"></div>
+      <div>
+        <div id="advisor-name" class="name"></div>
+        <div id="advisor-text" class="text"></div>
+      </div>
+    </div>
+
+    <div id="inspect" hidden>
+      <div id="inspect-icon" class="face"></div>
+      <div class="grow">
+        <div id="inspect-title" class="name"></div>
+        <div id="inspect-sub" class="text"></div>
+        <div id="inspect-bars"></div>
+      </div>
+    </div>
+
+    <div id="toast" hidden></div>
+    <footer id="hints"></footer>
+
+    <div id="radial" hidden></div>
+
+    <section id="almanac" hidden>
+      <h1>Almanac del Presidente</h1>
+      <div class="cards">
+        <div class="card"><h2>🏝️ La Isla</h2><div id="almanac-island"></div></div>
+        <div class="card"><h2>🧤 La Mano</h2><div id="almanac-hand"></div></div>
+        <div class="card"><h2>⚙️ El Motor</h2><div id="almanac-engine"></div></div>
+      </div>
+    </section>
+
+    <section id="title">
+      <div class="title-box">
+        <div class="kicker">República Divina de San Milagro · 1961</div>
+        <h1>EL DIOS<br>PRESIDENTE</h1>
+        <p id="title-status">Press any button on your DualShock 4</p>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
