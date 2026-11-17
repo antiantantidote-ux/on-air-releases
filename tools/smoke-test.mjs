@@ -55,6 +55,21 @@ check('boots without errors', errors.length === 0, errors.join(' | '));
 
 await tap(B.cross);
 check('title dismissed by Cross', await game(() => document.getElementById('title').hidden));
+
+// Choose your Mascota: D-pad right -> Jaguar, left -> back to the Capybara, Cross hatches it.
+check('creature chooser shown', await game(() => !document.getElementById('choose').hidden));
+await tap(B.right);
+check('D-pad moves the selection', await game(() => document.querySelectorAll('.pick')[1].classList.contains('selected')));
+await shot('01b-choose');
+await tap(B.left);
+await tap(B.cross);
+check('Cross hatches the chosen Creature', await game(() => {
+  const g = window.__game;
+  return g.creature.alive && g.creature.species.key === 'capybara' && document.getElementById('choose').hidden;
+}));
+await wait(400);
+await shot('01c-hatched');
+await game(() => { window.__game.creature.paused = true; }); // keep it in the nest while Phases 1-2 are exercised
 await wait(500);
 await shot('02-island');
 
@@ -150,7 +165,7 @@ check('Tremor miracle fired', await game(() => window.__game.stats.miracles === 
 check('miracles spend Mana (15 + 30)', Math.abs((await game(() => window.__game.society.mana)) - 55) < 3);
 await shot('10-tremor');
 await tap(B.triangle);
-check('Triangle toggles to the Nest', await game(() => window.__game.hand.pos.x < -30));
+check('Triangle toggles to the Creature', await game(() => { const g = window.__game; return Math.hypot(g.hand.pos.x - g.creature.pos.x, g.hand.pos.z - g.creature.pos.z) < 12; }));
 await wait(400);
 await shot('11-nest');
 
@@ -240,7 +255,12 @@ check('dropping an islander on a workplace reassigns them', await game(() => {
 }));
 
 // Inspect a building, bless it with Cross (10 Mana).
-await game(() => { const g = window.__game, b = g.buildings.list.at(-1); g.sky.setHour(10); g.hand.teleport(b.x + 4, b.z - 4); g.rig.snapTo(b.x, b.z); g.entities.clearCargo(); });
+await game(() => {
+  const g = window.__game, b = g.buildings.list.at(-1);
+  g.sky.setHour(10); g.hand.teleport(b.x + 4, b.z - 4); g.rig.snapTo(b.x, b.z); g.entities.clearCargo();
+  // Shoo the field hands out of the way so the Hand is unambiguously over the building.
+  for (const c of g.entities.lists.citizen) if (Math.hypot(c.pos.x - b.x, c.pos.z - b.z) < 14) { c.state = 'siesta'; c.timer = 600; c.pos.x = b.x + 16; c.pos.z = b.z + 16; }
+});
 await wait(200);
 await tap(B.square);
 check('Square inspects a building', (await game(() => document.getElementById('inspect-title').textContent)) === 'Sugar Plantation');
@@ -263,6 +283,74 @@ check('Circle leaves demolish mode', await game(() => !window.__game.mode));
 
 await tap(B.options); await wait(600);
 await shot('19-almanac-economy');
+await tap(B.options);
+
+// ---------------------------------------------------------------------------------
+// Phase 3: the Creature
+// ---------------------------------------------------------------------------------
+const deeds = () => game(() => Object.values(window.__game.creature.deeds).reduce((a, b) => a + b, 0));
+await game(() => { const g = window.__game; g.sky.setHour(8); g.creature.paused = false; g.fastForward(200); });
+check('Creature acts on its own', (await deeds()) >= 3, `${await deeds()} deeds: ${await game(() => JSON.stringify(window.__game.creature.deeds))}`);
+check('Creature left the nest', await game(() => { const c = window.__game.creature; return Math.hypot(c.pos.x + 46, c.pos.z - 52) > 12 || c.deeds.sleep > 0; }));
+
+// Order a dance, then hover the Hand over the Creature.
+check('Creature obeys an order when it trusts you', await game(() => { const c = window.__game.creature; c.affection = 1; return c.command('dance') === 'ok' && c.current.action === 'dance'; }));
+await game(() => { const g = window.__game, c = g.creature; c.paused = true; g.hand.teleport(c.pos.x, c.pos.z); g.rig.snapTo(c.pos.x, c.pos.z); });
+await wait(200);
+check('Hand detects the Creature', await game(() => window.__game.hoverCreature));
+check('Creature status card appears', (await game(() => document.getElementById('inspect-title').textContent)).includes('Don Carpincho'));
+await shot('20-creature-hover');
+
+// Square = pet: the weight for (drive, dance) goes up.
+const danceW = () => game(() => { const c = window.__game.creature; const d = c.credit.drive; return { w: c.W[d].dance, other: c.W[d === 'tired' ? 'playful' : 'tired'].dance }; });
+const w0 = await danceW();
+await tap(B.square);
+const w1 = await danceW();
+check('Square pets: rewarded behaviour gets likelier', w1.w > w0.w * 1.3 && await game(() => window.__game.creature.pets === 1), `${w0.w.toFixed(2)} -> ${w1.w.toFixed(2)}`);
+check('lessons generalise to other moods', w1.other > w0.other);
+await shot('21-pet');
+await wait(1200);
+
+// Circle = slap: weight drops and the deed is abandoned.
+await tap(B.circle);
+const w2 = await danceW();
+check('Circle slaps: punished behaviour gets rarer', w2.w < w1.w * 0.7 && await game(() => window.__game.creature.slaps === 1), `${w1.w.toFixed(2)} -> ${w2.w.toFixed(2)}`);
+check('a slap stops the deed in progress', await game(() => window.__game.creature.current === null));
+check('slapping costs trust', await game(() => window.__game.creature.affection < 1));
+
+// R2 = leash: it follows the Hand.
+await tap(B.r2);
+check('R2 leashes the Creature', await game(() => window.__game.creature.leashed));
+await game(() => {
+  const g = window.__game, c = g.creature, s = g.buildings.findSpot('tenement', 18, 34, 40);
+  c.paused = false; g.hand.teleport(s.x, s.z); g.fastForward(40);
+});
+check('leashed Creature follows the Hand', await game(() => { const g = window.__game; return Math.hypot(g.hand.pos.x - g.creature.pos.x, g.hand.pos.z - g.creature.pos.z) < 14; }));
+await game(() => { const g = window.__game, c = g.creature; c.paused = true; g.hand.teleport(c.pos.x, c.pos.z); });
+await wait(200);
+await tap(B.r2);
+check('R2 again releases it', await game(() => !window.__game.creature.leashed));
+
+// The dark side: a hungry Creature told to eat someone does, and witnesses remember.
+const pop0 = await game(() => window.__game.entities.count('citizen'));
+await game(() => {
+  const g = window.__game, c = g.creature;
+  g.sky.setHour(10); g.fastForward(30); // get people out of bed
+  c.paused = false;
+  for (let tries = 0; tries < 4 && !c.eaten; tries++) { c.hunger = 0.9; c.affection = 1; c.command('eatCitizen'); g.fastForward(60); } // prey can escape indoors
+});
+check('Creature can eat an islander', await game(() => window.__game.creature.eaten >= 1), `population ${pop0} -> ${await game(() => window.__game.entities.count('citizen'))}`);
+
+// Long unattended run: no crashes, a spread of behaviours.
+await game(() => window.__game.fastForward(700));
+const kinds = await game(() => Object.values(window.__game.creature.deeds).filter((n) => n > 0).length);
+check('varied repertoire over time', kinds >= 4, `${kinds} kinds: ${await game(() => JSON.stringify(window.__game.creature.deeds))}`);
+
+// Almanac page 2: the Creature's mind.
+await tap(B.options); await wait(300);
+await tap(B.right); await wait(400);
+check('Almanac shows the Creature weight grid', (await game(() => document.querySelectorAll('.mind .cell').length)) === 55);
+await shot('22-almanac-creature');
 await tap(B.options);
 
 // Midnight render + budget checks.

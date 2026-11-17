@@ -4,13 +4,15 @@ A god-game / banana-republic dictator sim for **Android TV**, played entirely wi
 **DualShock 4**. You are the ancient island deity of San Milagro, who has discovered that
 rigged elections scale better than blood sacrifice.
 
-**Status: Phase 2 of 4**
+**Status: Phase 3 of 4**
 
 - Phase 1 — engine, island, water, day/night, the Divine Hand (grab / throw), orbit camera,
   radial-wheel framework, 10-foot HUD.
 - Phase 2 — building placement and construction, supply chains (sugar → rum, tobacco →
   cigars), dock exports by freighter, islanders with five needs and a job/eat/pray/sleep/protest
   state machine, the Peso and Mana loops, costed miracles and edicts.
+- Phase 3 — El Mascota Supremo: choose a giant Capybara, Jaguar or Macaw, which hatches at the
+  Nest and acts on its own. Pet it (Square) or slap it (Circle) to reshape its behaviour.
 
 ## Stack
 
@@ -40,16 +42,16 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 | --- | --- |
 | Left stick | Move the Hand (camera follows outside a deadzone) |
 | Right stick | Orbit (X) / pitch (Y) camera; aims the radial wheels |
-| R2 | Hold = grab, release while moving = throw. Tap = latch in the fist, tap again = let go |
+| R2 | Hold = grab, release while moving = throw. Tap = latch in the fist, tap again = let go. Over the Creature: leash / unleash (it follows the Hand) |
 | L2 (hold) | Precision slow-move (the Hand points) |
 | L1 (hold) | Construction & Edicts wheel (Farms, Industry, Civic, Requisition, Edicts, Demolish) — ✕ confirm, ○ back |
-| R1 (hold) | Miracles wheel (costs Mana) |
+| R1 (hold) | Miracles wheel (costs Mana) and Mascota commands |
 | ✕ | Bless an islander; bless a building (10 Mana: ×2.5 output for 30 s, or +20% construction). In blueprint mode: build |
-| □ | Inspect islander, building, cargo or terrain. In blueprint mode: rotate 45° |
-| ○ | Close card / set down the held object / cancel blueprint or demolish mode |
-| △ | Snap to Palace ↔ Creature's Nest |
+| □ | Inspect islander, building, cargo or terrain. In blueprint mode: rotate 45°. **Over the Creature: pet** |
+| ○ | Close card / set down the held object / cancel blueprint or demolish mode. **Over the Creature: slap** |
+| △ | Snap to Palace ↔ Creature |
 | D-pad | ← pause · ↑ 1× · → 2× · ↓ replay advisor alerts |
-| Options / touchpad click | Almanac del Presidente |
+| Options / touchpad click | Almanac del Presidente (D-pad ←/→ flips between the economy and the Creature's mind) |
 
 Keyboard mirror for desk debugging: WASD = left stick, arrows = right stick, Space = R2,
 Shift = L2, Q/E = L1/R1, Enter = ✕, F = □, Esc = ○, T = △, 1/2/3/4 = D-pad ←/↑/→/↓, Tab = Options.
@@ -65,6 +67,23 @@ Shift = L2, Q/E = L1/R1, Enter = ✕, F = □, Esc = ○, T = △, 1/2/3/4 = D-p
 - **The Hand is part of the economy**: drop a crate on a building site for +25% progress, drop
   cargo on the dock to export it, drop an islander on a workplace to give them that job.
 
+## How the Creature learns
+
+Every few seconds the Creature works out its dominant **drive** — Hungry, Tired, Unrest (there
+are protesters), Diligent (there is work) or Playful — and samples one of eleven **actions**
+from that row of a weight matrix: water crops, help build, haul goods, dance, preach, eat
+plantains, eat a citizen, smash a building, scare protesters, sleep, play.
+
+- **Pet (Square)** multiplies the weight of what it is doing, or did in the last 12 seconds, by
+  up to 1.45. **Slap (Circle)** multiplies it by as little as 0.5 and stops the deed cold.
+- Feedback fades the longer you wait, and 30% of each lesson carries over to the same action
+  under the other drives.
+- Slaps cost **trust**; a Creature with low trust ignores orders from the R1 wheel.
+- Species differ in starting instincts and in bonuses (the Capybara waters and dances twice as
+  well, the Jaguar scatters protesters twice as far, the Macaw's sermons raise twice the Mana).
+- The Almanac's second page shows the whole matrix as a dot grid: bigger = more likely,
+  green = rewarded, red = punished.
+
 ## Code map (`web/src`)
 
 | File | Responsibility |
@@ -79,6 +98,7 @@ Shift = L2, Q/E = L1/R1, Enter = ✕, F = □, Esc = ○, T = △, 1/2/3/4 = D-p
 | `buildings.js` | Building definitions and models, placement rules, construction, production, freighter |
 | `society.js` | Islander needs and task state machine, jobs, housing, immigration, Peso/Mana ledger |
 | `icons.js` | World-space status icons and progress bars (one instanced draw call) |
+| `creature.js` | The three Creature models, drive/action utility AI, weight matrix and pet/slap learning |
 | `hand.js` | The glove, grab/throw state machine, ground decals |
 | `camera.js` | Deadzone-follow orbit rig |
 | `radial.js` | Data-driven radial wheel (sub-wheels supported) |
@@ -94,5 +114,5 @@ the minimum-font-size rule.
 
 1. **Engine, island, camera, DS4 Hand** — done
 2. **City building, citizens, Peso/Mana economy** — done
-3. The Creature and its reinforcement learning (the egg in the Nest hatches)
+3. **The Creature and its reinforcement learning** — done
 4. Morality morphing, costed miracles and edicts, factions, advisors

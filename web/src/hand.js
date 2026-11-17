@@ -131,6 +131,10 @@ export function createHand(scene, terrain, entities, input, fx) {
   const prev = new THREE.Vector3();
   const COLOR_IDLE = new THREE.Color(0xffd34d), COLOR_TARGET = new THREE.Color(0x7dff7a), COLOR_HOLD = new THREE.Color(0xff8a4a);
 
+  let gesture = null;
+  hand.extraHover = 0;
+  hand.gesture = (kind) => { gesture = { kind, t: 0, d: kind === 'pet' ? 0.7 : 0.32 }; };
+
   hand.teleport = (x, z) => {
     hand.pos.set(x, terrain.surfaceAt(x, z), z);
     prev.copy(hand.pos);
@@ -213,16 +217,25 @@ export function createHand(scene, terrain, entities, input, fx) {
     }
 
     // --- pose the glove ---------------------------------------------------------------
-    const hoverTarget = hand.mode === 'reach' ? 3.2 : HOVER;
+    const hoverTarget = (hand.mode === 'reach' ? 3.2 : HOVER) + hand.extraHover;
     hoverY = lerp(hoverY, hoverTarget, 1 - Math.exp(-(hand.mode === 'reach' ? 30 : 12) * dt));
     const t = performance.now() / 1000;
-    glove.root.position.set(hand.pos.x, hand.pos.y + hoverY + Math.sin(t * 2.1) * 0.18, hand.pos.z);
+    // Pet = two soft strokes; slap = one fast swipe.
+    let dip = 0, swipe = 0;
+    if (gesture) {
+      gesture.t += dt;
+      const k = gesture.t / gesture.d;
+      if (k >= 1) gesture = null;
+      else if (gesture.kind === 'pet') dip = Math.abs(Math.sin(k * Math.PI * 2)) * 2.4;
+      else { dip = Math.sin(k * Math.PI) * 3.2; swipe = Math.sin(k * Math.PI * 2) * 1.1; }
+    }
+    glove.root.position.set(hand.pos.x, hand.pos.y + hoverY - dip + Math.sin(t * 2.1) * 0.18, hand.pos.z);
     const vf = hand.vel.x * rig.forward.x + hand.vel.z * rig.forward.y;
     const vr = hand.vel.x * rig.right.x + hand.vel.z * rig.right.y;
     glove.root.rotation.set(
       lerp(glove.root.rotation.x, clamp(-vf * 0.007, -0.4, 0.4) - 0.12, 0.2),
       rig.yaw,
-      lerp(glove.root.rotation.z, clamp(-vr * 0.007, -0.4, 0.4), 0.2)
+      lerp(glove.root.rotation.z, clamp(-vr * 0.007, -0.4, 0.4), 0.2) + swipe
     );
 
     const fist = hand.mode === 'hold' ? 0.85 : hand.mode === 'reach' ? 0.45 : pad.down.r2 && enabled ? 1 : 0.12;

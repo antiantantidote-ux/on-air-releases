@@ -3,8 +3,9 @@
 // atlas that is rasterised once at boot.
 import * as THREE from './three.js';
 
-const EMOJI = ['👷', '⛔', '📦', '🏗️', '🍌', '🤒', '🏚️', '🙏', '✊', '💤', '✨', '💰', '🚢', '❓', '🧱', '⚡'];
-const GRID = 4, CELL = 96, CAPACITY = 192;
+const EMOJI = ['👷', '⛔', '📦', '🏗️', '🍌', '🤒', '🏚️', '🙏', '✊', '💤', '✨', '💰', '🚢', '❓', '🧱', '⚡',
+  '❤️', '💢', '💧', '🎵', '📣', '😈', '💥', '😱', '⚽', '🐾'];
+const GRID = 6, CELL = 96, CAPACITY = 192;
 
 export function createIcons(scene) {
   const canvas = document.createElement('canvas');

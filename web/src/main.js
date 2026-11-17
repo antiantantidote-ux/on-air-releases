@@ -1,6 +1,7 @@
 // EL DIOS PRESIDENTE — bootstrap and frame loop.
 // Phase 1: engine, island, water, day/night, DS4 hand (grab/throw), camera, radial wheels.
 // Phase 2: building placement, construction, supply chains, citizens' needs, Pesos & Mana.
+// Phase 3: the Creature — utility AI, drive x action weight matrix, pet / slap training.
 import * as THREE from './three.js';
 import { createTerrain, SITES } from './terrain.js';
 import { createSky } from './sky.js';
@@ -10,6 +11,7 @@ import { createEntities, TYPES } from './entities.js';
 import { createBuildings, BUILDINGS, GOODS } from './buildings.js';
 import { createSociety } from './society.js';
 import { createIcons } from './icons.js';
+import { createCreature, SPECIES, DRIVES } from './creature.js';
 import { createInput } from './input.js';
 import { createCameraRig } from './camera.js';
 import { createHand, createPulses } from './hand.js';
@@ -168,6 +170,49 @@ const hand = createHand(scene, terrain, entities, input, {
 });
 hand.teleport(SITES.palace.x + 6, SITES.palace.z + 16);
 rig.snapTo(hand.pos.x, hand.pos.z);
+
+// ---------------------------------------------------------------------------------
+// El Mascota Supremo
+// ---------------------------------------------------------------------------------
+const creature = createCreature(scene, terrain, {
+  entities, buildings, society,
+  fx: {
+    pulse: (x, z, size, color) => pulses.emit(x, z, size, color, 0.8),
+    shake: (amount) => rig.addShake(amount),
+    rumble: (strong, weak, ms) => input.rumble(strong, weak, ms),
+    toast: (text) => hud.toast(text),
+    say: (who, text, key) => hud.advise(who, text, key),
+  },
+});
+
+/** Square = pet (+1), Circle = slap (-1), while the Hand hovers over the Creature. */
+function teach(sign) {
+  const lesson = sign > 0 ? creature.pet() : creature.slap();
+  hand.gesture(sign > 0 ? 'pet' : 'slap');
+  if (sign > 0) input.rumble(0.1, 0.5, 220); else { input.rumble(1, 0.4, 120); rig.addShake(0.25); }
+  const name = creature.species.name;
+  if (lesson) {
+    const pct = Math.round((lesson.weight / lesson.prior) * 100);
+    hud.toast(`${sign > 0 ? '❤️' : '💢'} “${creature.ACTIONS[lesson.action].label}” when ${DRIVES[lesson.drive].label.toLowerCase()}: ${pct}% of instinct`);
+  } else {
+    hud.toast(sign > 0 ? `❤️ ${name} is pleased, but not sure what for` : `💢 ${name} flinches, confused`);
+  }
+  if (sign > 0) hud.advise('xochitl', `Praise teaches. Pet ${name} during a deed, or within a few seconds after, and it will do that deed more often.`, 'pet');
+  else hud.advise('penultimo', `A firm slap stops ${name} mid-deed and makes that deed rarer. Too many and it stops obeying orders.`, 'slap');
+}
+
+function order(action, label, desc) {
+  return {
+    icon: creature.ACTIONS[action].icon, label, desc,
+    action: () => {
+      if (!creature.alive) return;
+      const r = creature.command(action), name = creature.species.name;
+      if (r === 'ok') hud.toast(`🐾 ${name}: “${creature.ACTIONS[action].label}” — at once!`);
+      else if (r === 'refused') { hud.toast(`💢 ${name} ignores the order`); hud.advise('penultimo', `${name} is sulking. Its trust in you is low — pet it more, slap it less.`, 'refused'); }
+      else hud.toast(`🐾 Nothing to ${creature.ACTIONS[action].label.toLowerCase()} right now`);
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------------
 // Modes: blueprint placement and demolition
@@ -351,6 +396,17 @@ const WHEEL_R1 = {
       }),
     },
     {
+      icon: '🐾', label: 'Mascota', desc: 'Orders for your Creature. It obeys if it trusts you.',
+      children: [
+        order('water', 'Water\ncrops', 'Go and water the nearest thirsty farm.'),
+        order('build', 'Help\nbuild', 'Lend a paw at the nearest building site.'),
+        order('haul', 'Haul\ngoods', 'Carry a big load to the factory or dock.'),
+        order('dance', 'Dance', 'Entertain the people at the palace.'),
+        order('scare', 'Guard', 'Scatter the protesters.'),
+        order('sleep', 'Go to\nsleep', 'Back to the nest for a nap.'),
+      ],
+    },
+    {
       icon: '☄️', label: 'Meteor', desc: 'A boulder, but from much higher up.', cost: '60 ✨',
       action: miracle(60, () => {
         const o = entities.spawn('boulder', hand.pos.x - 40, hand.pos.y + 120, hand.pos.z - 14);
@@ -412,6 +468,13 @@ function buildingCard(b) {
 }
 
 function cardFor(target) {
+  if (target.kind === 'creature') {
+    const sp = creature.species, d = DRIVES[creature.drive()];
+    return {
+      icon: sp.icon, title: `${sp.name} · ${sp.title}`, sub: `${d.icon} ${d.label} · ${creature.describe()}`,
+      bars: [['Fed', 1 - creature.hunger, '#ffd34d'], ['Energy', creature.energy, '#9fd8ff'], ['Trust', creature.affection, '#ff9be0']],
+    };
+  }
   if (target.kind === 'building') return target.ref.alive ? buildingCard(target.ref) : null;
   if (target.kind === 'ground') {
     const [icon, name] = biomeAt(target.x, target.z);
@@ -476,7 +539,10 @@ function bless() {
 let speed = 1;            // D-pad: 0 pause, 1x, 2x
 let simTime = 0;
 let started = false;
-let snapToNest = false;
+let snapToCreature = false;
+let choosing = false, pick = 0, stickArmed = true;
+let hoverCreature = false;
+let almanacPage = 0;
 let last = performance.now();
 let fps = 60, frameMs = 16.7, perfTimer = 0;
 const perf = { calls: 0, triangles: 0 };
@@ -494,6 +560,7 @@ function simulate(dt) {
   entities.update(dt, simTime);
   society.update(dt);
   buildings.update(dt, simTime);
+  creature.update(dt, simTime, hand.pos);
   sky.update(dt, rig.focus);
 }
 
@@ -505,7 +572,46 @@ function watchTheRepublic() {
   if (society.mana >= society.manaCap() - 1) warn('mana-full', 'xochitl', 'Your Mana overflows, Great One. Hold R1 and spend it; unused miracles are wasted.', 300);
 }
 
+function creatureCards() {
+  const C = creature, sp = C.species, drive = C.drive();
+  const cols = C.ACTION_KEYS.length;
+  let grid = `<div class="mind" style="grid-template-columns:auto repeat(${cols},1fr)"><div></div>`;
+  for (const a of C.ACTION_KEYS) grid += `<div class="head">${C.ACTIONS[a].icon}</div>`;
+  for (const d of C.DRIVE_KEYS) {
+    grid += `<div class="row${d === drive ? ' active' : ''}">${DRIVES[d].icon} ${DRIVES[d].label}</div>`;
+    for (const a of C.ACTION_KEYS) {
+      const w = C.W[d][a], ratio = w / C.P[d][a];
+      const size = (0.35 + 1.9 * Math.sqrt(w / 4)).toFixed(2);
+      const color = ratio > 1.12 ? '#5fe36a' : ratio < 0.9 ? '#ff6b5b' : '#c9d2e6';
+      const active = C.current && C.current.action === a && C.current.drive === d;
+      grid += `<div class="cell${active ? ' active' : ''}"><i style="width:${size}rem;height:${size}rem;background:${color}"></i></div>`;
+    }
+  }
+  grid += `</div><div class="mind-legend">Bigger dot = more likely<i style="background:#5fe36a"></i>rewarded<i style="background:#ff6b5b"></i>punished<i style="background:#c9d2e6"></i>instinct</div>`;
+  grid += `<div class="mind-legend">${C.ACTION_KEYS.map((a) => `<span>${C.ACTIONS[a].icon} ${C.ACTIONS[a].label}</span>`).join(' ')}</div>`;
+  const favourite = C.ACTION_KEYS.reduce((best, a) => (C.deeds[a] > C.deeds[best] ? a : best), C.ACTION_KEYS[0]);
+  return [
+    {
+      title: `${sp.icon} ${sp.name}`,
+      bars: [
+        ['Fed', 1 - C.hunger, 1, '#ffd34d', `${Math.round((1 - C.hunger) * 100)}%`],
+        ['Energy', C.energy, 1, '#9fd8ff', `${Math.round(C.energy * 100)}%`],
+        ['Trust', C.affection, 1, '#ff9be0', `${Math.round(C.affection * 100)}%`],
+      ],
+      stats: [
+        ['Mood', `${DRIVES[drive].icon} ${DRIVES[drive].label}`],
+        ['Doing', C.describe()],
+        ['Good · Bad deeds', `${C.good} · ${C.evil}`],
+        ['Pets · Slaps', `${C.pets} · ${C.slaps}`],
+        ['Favourite deed', C.deeds[favourite] ? `${C.ACTIONS[favourite].icon} ×${C.deeds[favourite]}` : '—'],
+      ],
+    },
+    { title: '🧠 What it has learned', wide: true, html: grid },
+  ];
+}
+
 function almanacCards() {
+  if (almanacPage === 1 && creature.alive) return creatureCards();
   const S = society, a = S.avg;
   const tone = (v) => (v > 0.6 ? '#7dff7a' : v > 0.35 ? '#ffd34d' : '#ff6b5b');
   const pct = (v) => `${Math.round(v * 100)}%`;
@@ -553,14 +659,16 @@ function almanacCards() {
 }
 
 function updateHints() {
-  if (hud.almanacOpen()) return hud.setHints([['options', 'Close'], ['circle', 'Close']]);
+  if (hud.almanacOpen()) return hud.setHints([['dpad', almanacPage ? 'Economy page' : 'Creature page'], ['options', 'Close']]);
   if (radial.isOpen) return hud.setHints([]);
   if (mode && mode.kind === 'place') return hud.setHints([['cross', `Build ${money(BUILDINGS[mode.type].cost)}`], ['square', 'Rotate'], ['circle', 'Cancel'], ['l2', 'Precision']]);
   if (mode && mode.kind === 'demolish') return hud.setHints([['cross', hoverBuilding ? `Demolish ${hoverBuilding.def.label}` : 'Demolish'], ['circle', 'Done']]);
   if (hand.held) return hud.setHints([['ls', 'Wind up'], ['r2', 'Release to throw'], ['circle', 'Set down'], ['square', 'Inspect']]);
+  if (hoverCreature) return hud.setHints([['square', 'Pet'], ['circle', 'Slap'], ['r2', creature.leashed ? 'Unleash' : 'Leash'], ['r1', 'Commands']]);
   if (hand.hover) return hud.setHints([['r2', 'Grab'], ['cross', 'Bless'], ['square', 'Inspect'], ['l2', 'Precision']]);
   if (hoverBuilding) return hud.setHints([['cross', hoverBuilding.built ? 'Bless 10✨' : 'Rush 10✨'], ['square', `Inspect ${hoverBuilding.def.label}`], ['l1', 'Build']]);
-  hud.setHints([['ls', 'Hand'], ['rs', 'Camera'], ['l1', 'Build'], ['r1', 'Miracles'], ['triangle', 'Palace / Nest'], ['options', 'Almanac']]);
+  if (creature.leashed) return hud.setHints([['ls', 'Lead the way'], ['r2', 'Unleash'], ['triangle', 'Palace / Mascota'], ['options', 'Almanac']]);
+  hud.setHints([['ls', 'Hand'], ['rs', 'Camera'], ['l1', 'Build'], ['r1', 'Miracles'], ['triangle', 'Palace / Mascota'], ['options', 'Almanac']]);
 }
 
 function refreshHud() {
@@ -582,16 +690,35 @@ function frame(now) {
 
   // --- title / controller gate -------------------------------------------------------
   if (!started) {
-    if (input.anyInput()) {
+    if (choosing) {
+      // Choose your Mascota: D-pad or left stick, Cross hatches the egg.
+      const flick = Math.abs(pad.lx) > 0.6 ? Math.sign(pad.lx) : 0;
+      let dir = (pad.pressed.right ? 1 : 0) - (pad.pressed.left ? 1 : 0);
+      if (flick && stickArmed) dir += flick;
+      stickArmed = !flick;
+      if (dir) { pick = (pick + dir + SPECIES.length) % SPECIES.length; hud.choose(SPECIES, pick); }
+      if (pad.pressed.cross) {
+        choosing = false; started = true;
+        hud.choose(null);
+        scenery.egg.visible = false;
+        creature.hatch(SPECIES[pick]);
+        pulses.emit(SITES.nest.x, SITES.nest.z, 16, 0xffe066, 1.0);
+        rig.addShake(0.6); input.rumble(0.8, 0.8, 400);
+        const name = creature.species.name;
+        hud.advise('xochitl', `${name} has hatched! Hover the Hand over it: Square to pet when it does well, Circle to slap when it misbehaves. It learns.`);
+        hud.advise('penultimo', 'Presidente! Press Triangle for the palace, then hold L1 to build. A sugar plantation near the dock and the pesos will flow.');
+      }
+    } else if (input.anyInput()) {
       const anyPress = Object.values(pad.pressed).some(Boolean);
       hud.showTitle(true, pad.connected
         ? 'DualShock 4 connected — press <span class="btn cross">✕</span> to rule'
         : 'Keyboard detected — press <b>Enter</b> to rule');
       if (anyPress) {
-        started = true;
         hud.showTitle(false);
-        hud.advise('penultimo', 'Presidente! Hold L1 to build. A sugar plantation near the dock and the pesos will flow.');
-        hud.advise('xochitl', 'The people pray at your palace, Great One. Their faith becomes your Mana — spend it with R1.');
+        choosing = true;
+        hud.choose(SPECIES, pick);
+        hand.teleport(SITES.nest.x + 5, SITES.nest.z + SITES.nest.r);
+        rig.snapTo(SITES.nest.x, SITES.nest.z);
       }
     }
     rig.yaw += realDt * 0.12; // attract-mode orbit
@@ -602,7 +729,15 @@ function frame(now) {
   }
 
   const playing = started;
-  hoverBuilding = hand.hover || hand.held ? null : buildings.at(hand.pos.x, hand.pos.z);
+  hoverCreature = playing && creature.alive && !hand.held && !mode
+    && Math.hypot(hand.pos.x - creature.pos.x, hand.pos.z - creature.pos.z) < creature.radius + 2.5;
+  hand.extraHover = hoverCreature ? creature.height - 3 : 0;
+  const demolishing = mode && mode.kind === 'demolish';
+  hoverBuilding = hoverCreature || hand.held || (hand.hover && !demolishing) ? null : buildings.at(hand.pos.x, hand.pos.z);
+  // The Creature's status card follows the Hand on and off it (Square is "pet" there, not "inspect").
+  if (hoverCreature) {
+    if (!inspecting || inspecting.kind !== 'creature') { inspecting = { kind: 'creature' }; hud.inspect(cardFor(inspecting)); }
+  } else if (inspecting && inspecting.kind === 'creature') { inspecting = null; hud.inspect(null); }
 
   if (playing) {
     // --- Almanac (Options / touchpad click) --------------------------------------------
@@ -610,6 +745,7 @@ function frame(now) {
       if (hud.almanacOpen()) hud.almanac(null);
       else { radial.close(); hud.almanac(almanacCards()); }
     } else if (hud.almanacOpen() && pad.pressed.circle) hud.almanac(null);
+    else if (hud.almanacOpen() && (pad.pressed.left || pad.pressed.right)) { almanacPage = 1 - almanacPage; hud.almanac(almanacCards()); }
 
     if (!hud.almanacOpen()) {
       // --- D-pad: game speed + alerts ---------------------------------------------------
@@ -631,8 +767,18 @@ function frame(now) {
       } else if (mode && mode.kind === 'demolish') {
         if (pad.pressed.cross && hoverBuilding) demolish(hoverBuilding);
         if (pad.pressed.circle) mode = null;
+      } else if (hoverCreature) {
+        // --- the Creature: pet, slap, leash -------------------------------------------------
+        if (pad.pressed.square) teach(1);
+        if (pad.pressed.circle) teach(-1);
+        if (pad.pressed.r2) {
+          const on = creature.toggleLeash();
+          hud.toast(on ? `🐾 ${creature.species.name} is on the leash — lead the way` : `🐾 ${creature.species.name} is off the leash`);
+          hud.advise('xochitl', 'On the leash it follows the Hand. Lead it to what you want it to learn about, then press R2 again to let it choose.', 'leash');
+        }
       } else {
         // --- face buttons ---------------------------------------------------------------
+        if (creature.leashed && pad.pressed.r2 && !hand.hover && !hand.held) { creature.toggleLeash(); hud.toast(`🐾 ${creature.species.name} is off the leash`); }
         if (pad.pressed.cross) bless();
         if (pad.pressed.square) openInspect();
         if (pad.pressed.circle) {
@@ -640,12 +786,13 @@ function frame(now) {
           else if (hand.held) hand.drop();
         }
         if (pad.pressed.triangle) {
-          const site = snapToNest ? SITES.nest : SITES.palace;
-          snapToNest = !snapToNest;
+          const toCreature = snapToCreature && creature.alive;
+          snapToCreature = !snapToCreature;
           if (hand.held) hand.drop();
-          hand.teleport(site.x + 4, site.z + site.r * 0.8);
+          if (toCreature) hand.teleport(creature.pos.x + creature.radius + 3, creature.pos.z + creature.radius + 3);
+          else hand.teleport(SITES.palace.x + 4, SITES.palace.z + SITES.palace.r * 0.8);
           rig.snapTo(hand.pos.x, hand.pos.z);
-          hud.toast(`△ ${site.name}`);
+          hud.toast(`△ ${toCreature ? creature.species.name : SITES.palace.name}`);
         }
       }
     }
@@ -655,7 +802,7 @@ function frame(now) {
   const menuOpen = radial.isOpen || hud.almanacOpen();
   const timeScale = !playing ? 1 : hud.almanacOpen() ? 0 : radial.isOpen ? 0.12 : speed;
 
-  hand.update(realDt, pad, rig, playing && !menuOpen, !mode);
+  hand.update(realDt, pad, rig, playing && !menuOpen, !mode && !hoverCreature);
   simulate(realDt * timeScale);
   pulses.update(realDt);
   rig.update(realDt, pad, hand.pos, playing && !menuOpen);
@@ -670,6 +817,7 @@ function frame(now) {
   icons.begin();
   buildings.render(simTime);
   society.renderIcons(icons);
+  creature.renderIcons(icons);
   if (mode && mode.kind === 'demolish' && hoverBuilding) icons.add(hoverBuilding.x, hoverBuilding.y + hoverBuilding.def.h + 5, hoverBuilding.z, 3.4, '🧱');
   icons.end();
 
@@ -697,7 +845,9 @@ hud.setSpeed(1);
 hud.showTitle(true);
 refreshHud();
 window.__game = {
-  renderer, scene, rig, hand, entities, buildings, society, sky, input, perf, stats, radial,
+  renderer, scene, rig, hand, entities, buildings, society, creature, sky, input, perf, stats, radial,
+  get hoverCreature() { return hoverCreature; },
+  SPECIES,
   get mode() { return mode; },
   /** Test hook: run the simulation headlessly for `seconds` of island time. */
   fastForward(seconds, step = 0.05) { for (let t = 0; t < seconds; t += step) simulate(step); refreshHud(); },

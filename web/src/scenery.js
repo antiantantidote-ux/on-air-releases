@@ -61,8 +61,6 @@ function nestGeometry() {
   const parts = [
     place(paint(new THREE.CylinderGeometry(5.2, 6, 1.1, 10), 0xc9a45a, 0.65), 0, 0.5, 0),
     place(paint(new THREE.CylinderGeometry(4.1, 4.4, 0.5, 10), 0x8f6f38, 0.9), 0, 1.0, 0),
-    // The egg. Whatever is inside is Phase 3's problem.
-    place(paint(new THREE.IcosahedronGeometry(2.2, 1), 0xf3ead2, 0.7), 0, 3.5, 0, 0.1, 0, 0.08, new THREE.Vector3(1, 1.32, 1)),
   ];
   for (let i = 0; i < 9; i++) {
     const a = (i / 9) * Math.PI * 2;
@@ -151,5 +149,11 @@ export function createScenery(scene, terrain, seed = 7) {
     return cleared;
   }
 
-  return { clearArea, counts: { palms: palms.length, trees: trees.length, rocks: rocks.length } };
+  const egg = new THREE.Mesh(
+    place(paint(new THREE.IcosahedronGeometry(2.2, 1), 0xf3ead2, 0.7), 0, 3.5, 0, 0.1, 0, 0.08, new THREE.Vector3(1, 1.32, 1)), vertexLit);
+  egg.name = 'egg';
+  egg.position.copy(nest.position);
+  scene.add(egg);
+
+  return { egg, clearArea, counts: { palms: palms.length, trees: trees.length, rocks: rocks.length } };
 }

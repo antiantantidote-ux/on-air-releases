@@ -11,6 +11,7 @@ const WAGE = 9;                // pesos per employed islander per day
 const FOOD_DECAY = 1 / 300;    // need units per second
 const FAITH_DECAY = 1 / 340;
 const HEALTH_DECAY = 1 / 1100;
+const UNTREATED_FLOOR = 0.22; // health never decays below this on its own
 const WEIGHTS = { food: 0.28, housing: 0.2, health: 0.17, liberty: 0.15, faith: 0.2 };
 
 export function createSociety(entities, buildings, terrain, sky, hooks) {
@@ -73,6 +74,16 @@ export function createSociety(entities, buildings, terrain, sky, hooks) {
     o.job = b; b.workers.push(o);
     return true;
   };
+
+  /** Remove an islander from the world and from every roster they were on. */
+  S.removeCitizen = (o) => {
+    release(o);
+    quitJob(o);
+    if (o.home) { o.home.residents.splice(o.home.residents.indexOf(o), 1); o.home = null; }
+    entities.remove(o);
+  };
+  /** Break up a protester: they go home shaken. */
+  S.disperse = (o) => { rest(o, 1.5); o.trauma = clamp(o.trauma + 0.2, 0, 0.8); };
 
   const foodSource = (o) => buildings.nearest(o.pos.x, o.pos.z, (b) => b.built && b.def.produces === 'food' && b.out > 0);
   const jobBlocked = (b) => (b.def.produces && b.out >= b.def.cap) || (b.def.consumes && b.inp === 0 && b.out === 0);
@@ -215,14 +226,14 @@ export function createSociety(entities, buildings, terrain, sky, hooks) {
       const asleep = o.task && o.task.kind === 'sleep' ? 0.4 : 1;
       n.food = Math.max(0, n.food - dt * FOOD_DECAY * asleep);
       n.faith = Math.max(0, n.faith - dt * FAITH_DECAY);
-      n.health = Math.max(0, n.health - dt * (HEALTH_DECAY + (n.food <= 0 ? 1 / 70 : 0)));
+      // Without a clinic people get run-down (and unhappy) but only starvation is fatal.
+      if (n.food <= 0) n.health = Math.max(0, n.health - dt / 70);
+      else if (n.health > UNTREATED_FLOOR) n.health = Math.max(UNTREATED_FLOOR, n.health - dt * HEALTH_DECAY);
       o.trauma = Math.max(0, o.trauma - dt / 500);
       if (n.health <= 0 && thinking) {
-        quitJob(o);
-        if (o.home) { o.home.residents.splice(o.home.residents.indexOf(o), 1); o.home = null; }
         S.deaths++;
         hooks.onDeath(o);
-        entities.remove(o);
+        S.removeCitizen(o);
         continue;
       }
       const needs = S.needsOf(o);

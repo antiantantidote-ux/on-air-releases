@@ -98,8 +98,16 @@ export function createHud() {
       return `<svg class="chart" viewBox="0 0 300 100" preserveAspectRatio="none"><polyline points="0,100 ${pts} 300,100" fill="${c.color}33" stroke="none"/><polyline points="${pts}" fill="none" stroke="${c.color}" stroke-width="3" vector-effect="non-scaling-stroke"/></svg><div class="chart-caption">${c.caption}</div>`;
     };
     $('almanac-cards').innerHTML = cards.map((c) =>
-      `<div class="card"><h2>${c.title}</h2>${c.chart ? chart(c.chart) : ''}${(c.bars || []).map(bar).join('')}${(c.stats || []).map(stat).join('')}</div>`).join('');
+      `<div class="card${c.wide ? ' wide' : ''}"><h2>${c.title}</h2>${c.chart ? chart(c.chart) : ''}${c.html || ''}${(c.bars || []).map(bar).join('')}${(c.stats || []).map(stat).join('')}</div>`).join('');
     $('almanac').hidden = false;
+  };
+
+  /** The "choose your Mascota" screen. options: [{ icon, title, name, blurb }] */
+  hud.choose = (options, index) => {
+    if (!options) { $('choose').hidden = true; return; }
+    $('choose-cards').innerHTML = options.map((o, i) =>
+      `<div class="pick${i === index ? ' selected' : ''}"><div class="pick-icon">${o.icon}</div><div class="name">${o.title}</div><div class="pick-name">“${o.name}”</div><div class="text">${o.blurb}</div></div>`).join('');
+    $('choose').hidden = false;
   };
 
   hud.setResources = (r) => {
