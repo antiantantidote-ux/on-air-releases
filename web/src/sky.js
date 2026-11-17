@@ -24,6 +24,7 @@ export function createSky(scene) {
     zenith: new THREE.Color(),
     horizon: new THREE.Color(),
     daylight: 1,             // 0 night .. 1 day
+    morph: 0,                // island mood from morality.js: -1 smog .. +1 golden
   };
 
   const sun = new THREE.DirectionalLight(0xffffff, 2.4);
@@ -92,6 +93,17 @@ export function createSky(scene) {
     env.zenith.copy(PAL.nightZenith).lerp(PAL.dayZenith, day).lerp(PAL.duskZenith, twilight * 0.45);
     env.horizon.copy(PAL.nightHorizon).lerp(PAL.dayHorizon, day).lerp(PAL.duskHorizon, twilight * 0.8);
 
+    // Alignment: ruthless rule chokes the sky with volcanic smog, benevolence gilds it.
+    const ruth = Math.max(0, -env.morph), bene = Math.max(0, env.morph);
+    if (ruth > 0) {
+      env.zenith.lerp(tmpB.set(0x3a2c2a), ruth * 0.75 * (0.35 + 0.65 * day));
+      env.horizon.lerp(tmpB.set(0xa85a34), ruth * 0.7 * (0.3 + 0.7 * day));
+    } else if (bene > 0) {
+      env.horizon.lerp(tmpB.set(0xffeec2), bene * 0.3 * day);
+    }
+    scene.fog.near = 170 - 95 * ruth;
+    scene.fog.far = 560 - 230 * ruth;
+
     const sunUp = e > -0.05;
     env.lightDir.copy(env.sunDir);
     if (!sunUp) env.lightDir.multiplyScalar(-1);
@@ -100,7 +112,8 @@ export function createSky(scene) {
     env.lightColor.copy(sunUp ? tmpA : PAL.moon);
 
     sun.color.copy(env.lightColor);
-    sun.intensity = sunUp ? 0.5 + 2.1 * smoothstep(-0.05, 0.35, e) : 0.42;
+    sun.intensity = (sunUp ? 0.5 + 2.1 * smoothstep(-0.05, 0.35, e) : 0.42) * (1 - 0.3 * ruth + 0.12 * bene);
+    if (sunUp) sun.color.lerp(tmpB.set(ruth > 0 ? 0xff7a4a : 0xffe7a8), ruth > 0 ? ruth * 0.55 : bene * 0.5);
     sun.position.copy(focus).addScaledVector(env.lightDir, 200);
     sun.target.position.copy(focus);
 

@@ -226,10 +226,13 @@ export function createCreature(scene, terrain, ctx) {
     },
     scare: {
       icon: '😱', label: 'Scare protesters', moral: -1,
-      find: () => { const o = citizens.find((o) => o.task && o.task.kind === 'protest' && o.state === 'act'); return o && { x: o.pos.x, z: o.pos.z, time: 2.5 }; },
+      find: () => { const o = citizens.find((o) => o.task && (o.task.kind === 'protest' || o.task.kind === 'raid') && o.state === 'act'); return o && { x: o.pos.x, z: o.pos.z, time: 2.5 }; },
       done: (t) => {
         let n = 0;
-        crowd(t.x, t.z, 16 * bonus('scare'), (o) => { if (o.task && o.task.kind === 'protest') { society.disperse(o); n++; } });
+        crowd(t.x, t.z, 16 * bonus('scare'), (o) => {
+          if (o.task && o.task.kind === 'protest') { society.disperse(o); n++; }
+          else if (o.rebel && fx.reform) { fx.reform(o); society.traumatise(o, 0.3); n++; } // raiders lose their nerve
+        });
         fx.pulse(t.x, t.z, 14, 0xff6b5b); fx.shake(0.4);
         if (n) { fx.toast(`😱 ${n} protesters scattered`); fx.say('penultimo', 'The mascot has explained the situation to the protesters. Loudly.', 'c-scare'); }
       },
@@ -298,7 +301,7 @@ export function createCreature(scene, terrain, ctx) {
     const score = {
       hungry: C.hunger > 0.55 ? C.hunger : 0,
       tired: C.energy < 0.3 ? 1 - C.energy : 0,
-      unrest: Math.min(1, society.protesters / 3) * 0.95,
+      unrest: Math.min(1, (society.protesters + (fx.raiding && fx.raiding() ? 4 : 0)) / 3) * 0.95,
       industrious: work ? 0.5 - C.boredom * 0.3 : 0,
       playful: 0.3 + C.boredom * 0.3,
     };
@@ -331,6 +334,7 @@ export function createCreature(scene, terrain, ctx) {
     if (next) { cur.target = next; C.state = 'go'; return; }
     C.deeds[cur.action]++;
     if (def.moral > 0) C.good++; else if (def.moral < 0) C.evil++;
+    if (fx.deed) fx.deed(cur.action, def.moral);
     if (cur.action !== 'play' && cur.action !== 'sleep') C.boredom = Math.min(1, C.boredom + 0.22);
     C.credit = { action: cur.action, drive: cur.drive, until: time + CREDIT_WINDOW };
     C.current = null; C.state = 'idle'; C.timer = 1.5 + rnd() * 2;

@@ -2,6 +2,7 @@
 // Phase 1: engine, island, water, day/night, DS4 hand (grab/throw), camera, radial wheels.
 // Phase 2: building placement, construction, supply chains, citizens' needs, Pesos & Mana.
 // Phase 3: the Creature — utility AI, drive x action weight matrix, pet / slap training.
+// Phase 4: alignment and island morphing, miracles, edicts, factions, rebels, elections, endings.
 import * as THREE from './three.js';
 import { createTerrain, SITES } from './terrain.js';
 import { createSky } from './sky.js';
@@ -12,6 +13,9 @@ import { createBuildings, BUILDINGS, GOODS } from './buildings.js';
 import { createSociety } from './society.js';
 import { createIcons } from './icons.js';
 import { createCreature, SPECIES, DRIVES } from './creature.js';
+import { createMorality, createRain } from './morality.js';
+import { createPolitics, FACTIONS } from './politics.js';
+import { createMusic } from './music.js';
 import { createInput } from './input.js';
 import { createCameraRig } from './camera.js';
 import { createHand, createPulses } from './hand.js';
@@ -62,6 +66,8 @@ const buildings = createBuildings(scene, terrain, scenery, icons, {
   onExport(total, sold) {
     society.earn(total);
     society.exported += total;
+    morality.shift(0, -0.008); // every shipment skims a little for the Swiss Altar Account
+    politics.bump('industrialists', 0.04);
     hud.toast(`🚢 Freighter paid ${money(total)}`);
     input.rumble(0.2, 0.4, 120);
     hud.advise('penultimo', `The freighter took ${sold.join(', ')}. Pesos, Presidente! A modest handling fee has gone to the Swiss Altar Account.`, 'export');
@@ -69,6 +75,16 @@ const buildings = createBuildings(scene, terrain, scenery, icons, {
   onBuilt(b) {
     pulses.emit(b.x, b.z, Math.max(b.def.w, b.def.d), 0x7dff7a, 0.9);
     hud.toast(`${b.def.icon} ${b.def.label} complete`);
+    if (b.def.monument) { politics.win(); return; }
+    if (!b.honoured) { // alignment and faction credit, once per building
+      b.honoured = true;
+      if (b.def.faith) { morality.shift(0.02, 0.1, 'Raised a cathedral'); politics.bump('devout', 0.2); }
+      else if (b.def.heals) { morality.shift(0.07, 0, 'Opened a clinic'); politics.bump('campesinos', 0.08); }
+      else if (b.def.housing) { morality.shift(0.04, 0); politics.bump('campesinos', 0.08); }
+      else if (b.def.guard) { morality.shift(-0.07, 0, 'Built a guard outpost'); politics.bump('junta', 0.2); }
+      else if (b.def.consumes || b.def.coastal) { morality.shift(0, -0.03); politics.bump('industrialists', 0.15); }
+      else if (b.def.produces === 'food') morality.shift(0.03, 0);
+    }
     if (b.def.faith) hud.advise('xochitl', 'A cathedral! Now their prayers will reach you four times as loudly.', 'cathedral');
     if (b.def.guard) hud.advise('penultimo', 'An outpost. Protests will be… brief. The people may feel slightly less free.', 'outpost');
     if (b.def.consumes) hud.advise('penultimo', `The ${b.def.label.toLowerCase()} needs ${GOODS[b.def.consumes].label.toLowerCase()}. Farm workers will haul it over.`, 'factory');
@@ -85,6 +101,7 @@ const entities = createEntities(scene, terrain, (event, o, data) => {
     if (o.type === 'citizen') {
       stats.dunked++;
       society.traumatise(o, 0.18);
+      morality.shift(-0.04, 0, 'Threw a citizen into the sea');
       hud.advise('penultimo', `${o.name} is in the sea. He will swim back a more loyal man, Presidente.`, 'dunk');
     } else if (o.type === 'boulder') {
       hud.advise('xochitl', 'The sea accepts your boulder, Great One. The fish are less enthusiastic.', 'boulder-sea');
@@ -97,10 +114,7 @@ const entities = createEntities(scene, terrain, (event, o, data) => {
     pulses.emit(o.pos.x, o.pos.z, big ? 9 : 2.5 + o.def.mass * 0.5, big ? 0xff9a3c : 0xe8d9a8, big ? 0.9 : 0.45);
     if (o.meteor) {
       o.meteor = false;
-      entities.shockwave(o.pos.x, o.pos.z, 18, 26);
-      rig.addShake(1.2);
-      input.rumble(1, 1, 450);
-      hud.advise('penultimo', 'Magnificent. Aim the next one at something that owes us money.', 'meteor');
+      meteorImpact(o.pos.x, o.pos.z);
     } else if (data.strength > 18) {
       rig.addShake(clamp(data.strength / 120, 0.1, 0.6));
       input.rumble(clamp(data.strength / 80, 0.2, 1), 0.3, 140);
@@ -116,7 +130,13 @@ const entities = createEntities(scene, terrain, (event, o, data) => {
     // Things the Hand drops onto buildings do something.
     if (o.type === 'citizen') {
       const b = buildings.at(o.pos.x, o.pos.z);
-      if (b && society.assignJob(o, b, true)) {
+      if (o.rebel) { // the re-education monastery
+        if (b && b.built && b.def.faith && politics.reform(o)) {
+          hud.toast(`⛪ ${o.name} has been re-educated`);
+          morality.shift(0.01, 0.03);
+          hud.advise('xochitl', 'The cathedral takes the rebel in. An hour of incense and he remembers who made the sunrise.', 'reeducate');
+        }
+      } else if (b && society.assignJob(o, b, true)) {
         hud.toast(`${b.def.icon} ${o.name} now works at the ${b.def.label}`);
         hud.advise('penultimo', 'Career counselling by divine hand. No one has ever refused the offer.', 'assign');
       }
@@ -143,6 +163,7 @@ const society = createSociety(entities, buildings, terrain, sky, {
     hud.advise('penultimo', 'New arrivals at the dock! They heard we have free beds and a functioning deity.', 'immigrant');
   },
   onPayday(day, today, wages, upkeep) {
+    politics.endOfDay(day);
     hud.toast(`📒 Day ${day}: +${money(today.income)} · −${money(today.expenses)}`);
     hud.advise('penultimo', `Midnight payroll: ${money(wages)} in wages and ${money(upkeep)} in upkeep. Details are in the Almanac (OPTIONS).`, 'payday');
   },
@@ -166,7 +187,7 @@ const hand = createHand(scene, terrain, entities, input, {
       hud.advise('xochitl', 'Carry it gently. Crates dropped on a building site speed the work; at the dock they are exported.', 'grab-cargo');
     }
   },
-  onThrow(o) { society.traumatise(o, 0.14); },
+  onThrow(o) { society.traumatise(o, 0.14); if (o.type === 'citizen' && !o.rebel) morality.shift(-0.025, 0); },
 });
 hand.teleport(SITES.palace.x + 6, SITES.palace.z + 16);
 rig.snapTo(hand.pos.x, hand.pos.z);
@@ -182,6 +203,37 @@ const creature = createCreature(scene, terrain, {
     rumble: (strong, weak, ms) => input.rumble(strong, weak, ms),
     toast: (text) => hud.toast(text),
     say: (who, text, key) => hud.advise(who, text, key),
+    // Phase 4: what the Creature does reflects on its master.
+    deed: (action, moral) => {
+      if (moral > 0) morality.shift(0.004, 0);
+      else if (moral < 0) morality.shift(action === 'eatCitizen' ? -0.08 : -0.03, 0, action === 'eatCitizen' ? 'Your Creature ate a citizen' : 'Your Creature ran amok');
+      if (action === 'eatCitizen') { politics.bump('devout', -0.12); politics.bump('campesinos', -0.1); politics.bump('junta', 0.05); }
+      if (action === 'preach') morality.shift(0, 0.005);
+    },
+    reform: (o) => politics.reform(o),
+    raiding: () => politics.raid,
+  },
+});
+
+// ---------------------------------------------------------------------------------
+// Alignment, politics, music
+// ---------------------------------------------------------------------------------
+const morality = createMorality(scene, sky, water);
+morality.setPalaceLevel(SITES.palace.level);
+const rain = createRain(scene, terrain);
+const music = createMusic();
+const politics = createPolitics(scene, {
+  entities, buildings, society, morality, terrain, scenery, sky,
+  fx: {
+    toast: (text) => hud.toast(text),
+    say: (who, text, key) => hud.advise(who, text, key),
+    warn: (key, who, text, seconds) => warn(key, who, text, seconds),
+    rumble: (strong, weak, ms) => input.rumble(strong, weak, ms),
+    ended: (over) => {
+      radial.close(); hud.almanac(null); hud.inspect(null); inspecting = null; mode = null;
+      hud.ending(over);
+      input.rumble(over.won ? 0.4 : 1, over.won ? 1 : 0.6, 700);
+    },
   },
 });
 
@@ -190,6 +242,7 @@ function teach(sign) {
   const lesson = sign > 0 ? creature.pet() : creature.slap();
   hand.gesture(sign > 0 ? 'pet' : 'slap');
   if (sign > 0) input.rumble(0.1, 0.5, 220); else { input.rumble(1, 0.4, 120); rig.addShake(0.25); }
+  morality.shift(sign > 0 ? 0.01 : -0.015, 0);
   const name = creature.species.name;
   if (lesson) {
     const pct = Math.round((lesson.weight / lesson.prior) * 100);
@@ -221,6 +274,7 @@ let mode = null; // null | { kind: 'place', type, rot, ghost } | { kind: 'demoli
 
 function beginPlacement(type) {
   const def = BUILDINGS[type];
+  if (def.monument && buildings.list.some((b) => b.def.monument)) { hud.toast('🎰 The Ziggurat-Casino is already under way'); return; }
   if (!society.canAfford(def.cost)) { hud.toast(`Not enough pesos for a ${def.label} (${money(def.cost)})`); return; }
   if (hand.held) hand.drop();
   mode = { kind: 'place', type, rot: 0, ghost: null };
@@ -243,6 +297,8 @@ function confirmPlacement() {
 
 function demolish(b) {
   const refund = Math.round(b.def.cost * 0.5);
+  if (b.built && (b.def.housing || b.def.heals)) { morality.shift(-0.06, 0, `Demolished a ${b.def.label.toLowerCase()}`); politics.bump('campesinos', -0.1); }
+  if (b.built && b.def.faith) { morality.shift(0, -0.12, 'Demolished a cathedral'); politics.bump('devout', -0.3); }
   buildings.remove(b);
   society.pesos += refund;
   pulses.emit(b.x, b.z, Math.max(b.def.w, b.def.d), 0xff6b5b, 0.7);
@@ -297,13 +353,157 @@ function moveSun(hour, label) {
   hud.advise('xochitl', 'You moved the SUN. The farmers’ almanac is now a work of fiction.', 'sun');
 }
 
+// --- miracles (Mana) -------------------------------------------------------------------
+function rainstorm() {
+  const x = hand.pos.x, z = hand.pos.z;
+  let farms = 0;
+  for (const b of buildings.list) {
+    if (b.built && b.def.produces && !b.def.indoor && Math.hypot(b.x - x, b.z - z) < 36) { b.boost = Math.max(b.boost, 45); farms++; }
+  }
+  for (const c of entities.lists.citizen) if (Math.hypot(c.pos.x - x, c.pos.z - z) < 36) c.needs.faith = Math.min(1, c.needs.faith + 0.1);
+  rain.start(x, z, 12);
+  pulses.emit(x, z, 30, 0x6fc8ff, 1.2);
+  morality.shift(0.05, 0.04, 'Sent rain to the fields');
+  politics.bump('campesinos', 0.08);
+  hud.toast(`🌧️ Rainstorm: ${farms} farm${farms === 1 ? '' : 's'} flourishing`);
+  hud.advise('xochitl', 'Rain on demand! The crops drink and the farmers weep with gratitude.', 'rain');
+}
+
+function healPlague() {
+  const x = hand.pos.x, z = hand.pos.z;
+  let healed = 0, cured = 0;
+  for (const c of entities.lists.citizen) {
+    if (Math.hypot(c.pos.x - x, c.pos.z - z) > 38) continue;
+    if (c.plague) { c.plague = false; cured++; }
+    if (c.needs.health < 0.95) healed++;
+    c.needs.health = 1;
+  }
+  pulses.emit(x, z, 32, 0x7dff7a, 1.2);
+  morality.shift(0.07, 0.03, 'Healed the sick');
+  hud.toast(cured ? `💚 Plague lifted from ${cured}; ${healed} healed` : `💚 ${healed} islanders healed`);
+  hud.advise('xochitl', 'You laid your Hand on them and they are whole. THIS is what a god is for.', 'heal');
+}
+
+function convertCitizens() {
+  const x = hand.pos.x, z = hand.pos.z;
+  let n = 0, reformed = 0;
+  for (const c of entities.lists.citizen) {
+    if (Math.hypot(c.pos.x - x, c.pos.z - z) > 30) continue;
+    c.needs.faith = 1; n++;
+    if (politics.reform(c)) reformed++;
+  }
+  pulses.emit(x, z, 26, 0x58e0c0, 1.2);
+  morality.shift(0, 0.07, 'Converted the doubtful');
+  politics.bump('devout', 0.1);
+  hud.toast(reformed ? `🙏 ${n} converted, ${reformed} rebels among them` : `🙏 ${n} islanders see the light`);
+  hud.advise('penultimo', 'Conversion by miracle: cheaper than propaganda and nobody asks for a recount.', 'convert');
+}
+
+function meteorStrike() {
+  const o = entities.spawn('boulder', hand.pos.x - 10, hand.pos.y + 130, hand.pos.z - 4);
+  if (!o) { society.mana += 60; hud.toast('The heavens are out of rocks'); return; }
+  const vy = -45, T = (vy + Math.sqrt(vy * vy + 2 * 34 * 130)) / 34; // time to fall 130 m
+  entities.launch(o, 10 / T, vy, 4 / T, 0.3);
+  o.meteor = true;
+  o.tint.setRGB(1.6, 0.7, 0.35);
+  hud.toast('☄️ Incoming!');
+}
+
+/** Called when a meteor lands: it flattens buildings and kills whoever is underneath. */
+function meteorImpact(x, z) {
+  let dead = 0, rebels = 0, ruined = 0;
+  for (const c of [...entities.lists.citizen]) {
+    if (c.hidden || Math.hypot(c.pos.x - x, c.pos.z - z) > 11) continue;
+    if (c.rebel) rebels++;
+    society.removeCitizen(c); dead++;
+  }
+  for (const b of buildings.list) {
+    if (b.built && !b.def.monument && Math.hypot(b.x - x, b.z - z) < 12) { b.built = false; b.progress = 0.08; ruined++; }
+  }
+  entities.shockwave(x, z, 20, 28);
+  rig.addShake(1.3);
+  input.rumble(1, 1, 500);
+  if (dead || ruined) {
+    morality.shift(-0.06 - 0.03 * Math.min(4, dead - rebels) - 0.03 * ruined, 0, 'Called down a meteor');
+    politics.bump('junta', 0.1); politics.bump('devout', -0.05 * Math.min(3, dead - rebels));
+    hud.toast(`☄️ ${dead} killed${rebels ? ` (${rebels} rebels)` : ''}, ${ruined} building${ruined === 1 ? '' : 's'} flattened`);
+  }
+  hud.advise('penultimo', 'Magnificent. Aim the next one at something that owes us money.', 'meteor');
+}
+
+// --- edicts (Pesos) --------------------------------------------------------------------
+const EDICTS = [
+  {
+    icon: '🥃', label: 'Free Rum\nRations', desc: 'Everyone forgives you a little. Bosses and priests disapprove.', cost: '$400',
+    action: edict(400, () => {
+      for (const c of entities.lists.citizen) { c.trauma = Math.max(0, c.trauma - 0.25); c.needs.food = Math.min(1, c.needs.food + 0.15); }
+      politics.bump('campesinos', 0.2); politics.bump('industrialists', -0.1); politics.bump('devout', -0.1);
+      morality.shift(0.05, -0.04, 'Handed out free rum');
+      hud.toast('🥃 Free rum for all!');
+      hud.advise('penultimo', 'A drunk electorate is a grateful electorate. Productivity is tomorrow’s problem.', 'rum');
+    }),
+  },
+  {
+    icon: '🎭', label: 'Mardi Gras\nTax', desc: 'A festive levy: +$800 now, grumbling later.', cost: '+$800',
+    action: edict(0, () => {
+      society.earn(800);
+      for (const c of entities.lists.citizen) c.trauma = Math.min(0.8, c.trauma + 0.08);
+      politics.bump('campesinos', -0.15); politics.bump('industrialists', -0.2);
+      morality.shift(-0.03, -0.08, 'Levied the Mardi Gras Tax');
+      hud.toast('🎭 Mardi Gras Tax collected: +$800');
+      hud.advise('penultimo', 'We tax the parade, the beads and the fun itself. Ten percent goes to the Swiss Altar Account, naturally.', 'tax');
+    }),
+  },
+  {
+    icon: '😴', label: 'Mandatory\nSiesta', desc: 'Everyone outdoors lies down. Workers love it, owners do not.', cost: '$150',
+    action: edict(150, () => {
+      const n = entities.siesta(14);
+      politics.bump('campesinos', 0.1); politics.bump('industrialists', -0.15);
+      hud.toast(`😴 ${n} islanders ordered to nap`);
+      hud.advise('penultimo', 'A sleeping population cannot protest. Efficient.', 'siesta');
+    }),
+  },
+  {
+    icon: '🪖', label: 'Martial\nLaw', desc: 'Toggle. No protests, no recruiting, no elections — and no liberty.', cost: '$500 to declare',
+    action: () => {
+      if (politics.martialLaw) {
+        politics.martialLaw = society.martialLaw = false;
+        politics.bump('campesinos', 0.1);
+        hud.toast('🪖 Martial law lifted');
+        return;
+      }
+      if (!society.spend(500)) { hud.toast('Not enough pesos ($500)'); return; }
+      stats.edicts++;
+      politics.martialLaw = society.martialLaw = true;
+      for (const c of entities.lists.citizen) if (c.task && c.task.kind === 'protest') society.disperse(c);
+      politics.bump('junta', 0.3); politics.bump('campesinos', -0.25); politics.bump('devout', -0.1);
+      morality.shift(-0.2, 0, 'Declared martial law');
+      hud.toast('🪖 Martial law declared');
+      hud.advise('penultimo', 'Curfew, checkpoints, and my cousin in charge of both. The streets have never been so quiet.', 'martial');
+    },
+  },
+  {
+    icon: '🗳️', label: 'Rigged\nElections', desc: 'The next election is won before it is held.', cost: '$1,200',
+    action: () => {
+      if (politics.rigged) { hud.toast('🗳️ The next election is already arranged'); return; }
+      if (!society.spend(1200)) { hud.toast('Not enough pesos ($1,200)'); return; }
+      stats.edicts++;
+      politics.rigged = true;
+      politics.bump('devout', -0.15); politics.bump('junta', 0.05);
+      morality.shift(0, -0.2, 'Rigged an election');
+      hud.toast('🗳️ The ballot boxes have been… prepared');
+      hud.advise('xochitl', 'You would steal their voice, Great One? A god should not need to cheat.', 'rig');
+    },
+  },
+];
+
 const WHEEL_L1 = {
   title: 'Construction & Edicts',
   hint: 'Build, decree, requisition',
   items: [
     { icon: '🌾', label: 'Farms', desc: 'Food and cash crops.', children: ['plantain', 'sugar', 'tobacco', 'coffee'].map(buildItem) },
     { icon: '🏭', label: 'Industry', desc: 'Factories and the dock.', children: ['distillery', 'cigars', 'dock'].map(buildItem) },
-    { icon: '🏛️', label: 'Civic', desc: 'Homes, health, faith, order.', children: ['tenement', 'clinic', 'cathedral', 'outpost'].map(buildItem) },
+    { icon: '🏛️', label: 'Civic', desc: 'Homes, health, faith, order — and the Monument.', children: ['tenement', 'clinic', 'cathedral', 'outpost', 'ziggurat'].map(buildItem) },
     {
       icon: '📦', label: 'Requisition', desc: 'Physical goods, airmailed to the Hand.',
       children: [
@@ -316,39 +516,7 @@ const WHEEL_L1 = {
         },
       ],
     },
-    {
-      icon: '📜', label: 'Edicts', desc: 'Presidential decrees.',
-      children: [
-        {
-          icon: '😴', label: 'Mandatory\nSiesta', desc: 'Everyone outdoors lies down. That is an order.', cost: '$150',
-          action: edict(150, () => {
-            const n = entities.siesta(14);
-            hud.toast(`😴 ${n} islanders ordered to nap`);
-            hud.advise('penultimo', 'A sleeping population cannot protest. Efficient.', 'siesta');
-          }),
-        },
-        {
-          icon: '🎉', label: '¡Fiesta!', desc: 'Compulsory joy: lifts Faith, soothes grudges.', cost: '$400',
-          action: edict(400, () => {
-            let n = 0;
-            for (const c of entities.lists.citizen) {
-              c.needs.faith = Math.min(1, c.needs.faith + 0.3);
-              c.trauma = Math.max(0, c.trauma - 0.25);
-              if ((c.state === 'walk' || c.state === 'idle' || c.state === 'act') && !c.hidden) { entities.launch(c, 0, 7 + Math.random() * 4, 0, 0.5); n++; }
-            }
-            hud.toast(`🎉 ${n} islanders jump for joy`);
-          }),
-        },
-        {
-          icon: '🧹', label: 'Confiscate\nCargo', desc: 'All loose cargo becomes state property.', cost: 'Free',
-          action: edict(0, () => {
-            const n = entities.clearCargo();
-            hud.toast(`🧹 ${n} items confiscated`);
-            hud.advise('penultimo', 'Nationalised. It will be stored safely in my garage.', 'confiscate');
-          }),
-        },
-      ],
-    },
+    { icon: '📜', label: 'Edicts', desc: 'Presidential decrees, paid in pesos.', children: EDICTS },
     {
       icon: '🧱', label: 'Demolish', desc: 'Bulldoze buildings for a 50% refund.',
       action: () => { if (hand.held) hand.drop(); mode = { kind: 'demolish' }; },
@@ -357,9 +525,13 @@ const WHEEL_L1 = {
 };
 
 const WHEEL_R1 = {
-  title: 'Miracles',
+  title: 'Miracles & Mascota',
   hint: 'Miracles cost Mana and strike at the Hand',
   items: [
+    { icon: '🌧️', label: 'Rainstorm', desc: 'Farms near the Hand grow 2.5× faster.', cost: '25 ✨', action: miracle(25, rainstorm) },
+    { icon: '💚', label: 'Heal\nPlague', desc: 'Cures and heals everyone near the Hand.', cost: '30 ✨', action: miracle(30, healPlague) },
+    { icon: '🙏', label: 'Convert', desc: 'Restores faith nearby; rebels lay down arms.', cost: '40 ✨', action: miracle(40, convertCitizens) },
+    { icon: '☄️', label: 'Meteor\nStrike', desc: 'Kills and flattens whatever is under the Hand.', cost: '60 ✨', action: miracle(60, meteorStrike) },
     {
       icon: '☀️', label: 'Move\nthe Sun', desc: 'Time is a suggestion.',
       children: [
@@ -370,30 +542,36 @@ const WHEEL_R1 = {
       ],
     },
     {
-      icon: '🌋', label: 'Tremor', desc: 'The ground hiccups under the Hand.', cost: '30 ✨',
-      action: miracle(30, () => {
-        const n = entities.shockwave(hand.pos.x, hand.pos.z, 17, 24);
-        pulses.emit(hand.pos.x, hand.pos.z, 17, 0xff9a3c, 0.9);
-        rig.addShake(0.9);
-        input.rumble(1, 0.6, 350);
-        hud.toast(`🌋 Tremor! ${n} things airborne`);
-        hud.advise('xochitl', 'The earth trembles at your whim. So do the chickens.', 'tremor');
-      }),
-    },
-    {
-      icon: '🧲', label: 'Rapture', desc: 'Everything nearby flies to the Hand.', cost: '20 ✨',
-      action: miracle(20, () => {
-        let n = 0;
-        entities.forEachNear(hand.pos.x, hand.pos.z, 34, (o, d) => {
-          if (d < 3) return;
-          const T = 1.1; // solve a ballistic arc that ends at the cursor
-          _v.set((hand.pos.x - o.pos.x) / T, (hand.pos.y + 1 - o.pos.y) / T + 0.5 * 34 * T, (hand.pos.z - o.pos.z) / T);
-          entities.launch(o, _v.x, _v.y, _v.z);
-          n++;
-        });
-        pulses.emit(hand.pos.x, hand.pos.z, 12, 0x9fd8ff, 1.0);
-        hud.toast(`🧲 ${n} things answer the call`);
-      }),
+      icon: '🪄', label: 'Tricks', desc: 'Lesser wonders.',
+      children: [
+        {
+          icon: '🌋', label: 'Tremor', desc: 'The ground hiccups under the Hand.', cost: '30 ✨',
+          action: miracle(30, () => {
+            const n = entities.shockwave(hand.pos.x, hand.pos.z, 17, 24);
+            pulses.emit(hand.pos.x, hand.pos.z, 17, 0xff9a3c, 0.9);
+            rig.addShake(0.9);
+            input.rumble(1, 0.6, 350);
+            morality.shift(-0.02, 0);
+            hud.toast(`🌋 Tremor! ${n} things airborne`);
+            hud.advise('xochitl', 'The earth trembles at your whim. So do the chickens.', 'tremor');
+          }),
+        },
+        {
+          icon: '🧲', label: 'Rapture', desc: 'Everything nearby flies to the Hand.', cost: '20 ✨',
+          action: miracle(20, () => {
+            let n = 0;
+            entities.forEachNear(hand.pos.x, hand.pos.z, 34, (o, d) => {
+              if (d < 3) return;
+              const T = 1.1; // solve a ballistic arc that ends at the cursor
+              _v.set((hand.pos.x - o.pos.x) / T, (hand.pos.y + 1 - o.pos.y) / T + 0.5 * 34 * T, (hand.pos.z - o.pos.z) / T);
+              entities.launch(o, _v.x, _v.y, _v.z);
+              n++;
+            });
+            pulses.emit(hand.pos.x, hand.pos.z, 12, 0x9fd8ff, 1.0);
+            hud.toast(`🧲 ${n} things answer the call`);
+          }),
+        },
+      ],
     },
     {
       icon: '🐾', label: 'Mascota', desc: 'Orders for your Creature. It obeys if it trusts you.',
@@ -402,21 +580,9 @@ const WHEEL_R1 = {
         order('build', 'Help\nbuild', 'Lend a paw at the nearest building site.'),
         order('haul', 'Haul\ngoods', 'Carry a big load to the factory or dock.'),
         order('dance', 'Dance', 'Entertain the people at the palace.'),
-        order('scare', 'Guard', 'Scatter the protesters.'),
+        order('scare', 'Guard', 'Scatter protesters and raiders.'),
         order('sleep', 'Go to\nsleep', 'Back to the nest for a nap.'),
       ],
-    },
-    {
-      icon: '☄️', label: 'Meteor', desc: 'A boulder, but from much higher up.', cost: '60 ✨',
-      action: miracle(60, () => {
-        const o = entities.spawn('boulder', hand.pos.x - 40, hand.pos.y + 120, hand.pos.z - 14);
-        if (!o) { society.mana += 60; hud.toast('The heavens are out of rocks'); return; }
-        const vy = -40, T = (vy + Math.sqrt(vy * vy + 2 * 34 * 120)) / 34;
-        entities.launch(o, 40 / T, vy, 14 / T, 0.3);
-        o.meteor = true;
-        o.tint.setRGB(1.6, 0.7, 0.35);
-        hud.toast('☄️ Incoming!');
-      }),
     },
   ],
 };
@@ -514,6 +680,7 @@ function bless() {
     if (o.type === 'citizen') {
       if (o.state === 'siesta' || o.state === 'dazed') { o.state = 'idle'; o.timer = 0.3; }
       o.needs.faith = Math.min(1, o.needs.faith + 0.15);
+      morality.shift(0.015, 0.015);
       hud.toast(`✨ ${o.name} feels noticed`);
       hud.advise('xochitl', 'A gentle tap of blessing. See? The Hand can do more than throw.', 'bless');
     } else {
@@ -524,6 +691,7 @@ function bless() {
   const b = hoverBuilding;
   if (!b) return;
   if (!society.spendMana(10)) { hud.toast('Blessing a building costs 10✨'); return; }
+  morality.shift(0.01, 0.03);
   pulses.emit(b.x, b.z, Math.max(b.def.w, b.def.d), 0xffe066, 0.8);
   if (!b.built) { b.progress = Math.min(1, b.progress + 0.2); hud.toast(`✨ Divine scaffolding: ${b.def.label} +20%`); }
   else if (b.def.produces) { b.boost = 30; hud.toast(`✨ ${b.def.label} blessed: output ×2.5 for 30 s`); }
@@ -561,6 +729,7 @@ function simulate(dt) {
   society.update(dt);
   buildings.update(dt, simTime);
   creature.update(dt, simTime, hand.pos);
+  politics.update(dt);
   sky.update(dt, rig.focus);
 }
 
@@ -569,6 +738,13 @@ function watchTheRepublic() {
   if (society.avg.food < 0.35) warn('hunger', 'xochitl', 'The people are hungry, Great One. Another plantain farm, I beg you.');
   if (society.homeless > 8 && society.homeless > entities.count('citizen') * 0.4) warn('homeless', 'xochitl', `${society.homeless} of your people sleep under the palms. A tenement houses eight.`, 240);
   if (society.pesos < 0) warn('debt', 'penultimo', 'The treasury is empty! Export something — sugar, rum, anything — before payroll.');
+  for (const k of politics.KEYS) {
+    if (politics.approval[k] < 0.3) warn(`faction-${k}`, k === 'devout' ? 'xochitl' : 'penultimo', `${FACTIONS[k].icon} ${FACTIONS[k].label} are restless (${Math.round(politics.approval[k] * 100)}% approval). They want ${FACTIONS[k].wants}.`, 200);
+  }
+  if (politics.plague > 0) warn('plague', 'xochitl', `${politics.plague} of your people have the plague. A staffed clinic or the Heal miracle will save them.`, 120);
+  if (morality.benevolence < -0.5) hud.advise('xochitl', 'Look at the sky, Great One. The island is turning to ash and spikes around you. Is this who you are?', 'ruthless');
+  if (morality.benevolence > 0.5) hud.advise('xochitl', 'The island blooms for you, Great One. Sunbeams on the palace! The people sing.', 'benevolent');
+  if (morality.spirit < -0.5) hud.advise('penultimo', 'The Swiss Altar Account overflows, Presidente. The Devout mutter, but mutters cannot be audited.', 'corrupt');
   if (society.mana >= society.manaCap() - 1) warn('mana-full', 'xochitl', 'Your Mana overflows, Great One. Hold R1 and spend it; unused miracles are wasted.', 300);
 }
 
@@ -610,8 +786,52 @@ function creatureCards() {
   ];
 }
 
+function politicsCards() {
+  const tone = (v) => (v > 0.55 ? '#7dff7a' : v > 0.3 ? '#ffd34d' : '#ff6b5b');
+  const pct = (v) => `${Math.round(v * 100)}%`;
+  const b = morality.benevolence, sp = morality.spirit;
+  const compass = `<svg class="compass" viewBox="0 0 220 200">
+    <rect x="30" y="20" width="160" height="160" rx="10" fill="rgba(255,255,255,0.06)"/>
+    <line x1="30" y1="100" x2="190" y2="100"/><line x1="110" y1="20" x2="110" y2="180"/>
+    <text x="110" y="14" text-anchor="middle">Spiritual</text><text x="110" y="196" text-anchor="middle">Corrupt</text>
+    <text transform="translate(22 100) rotate(-90)" text-anchor="middle">Ruthless</text><text transform="translate(204 100) rotate(90)" text-anchor="middle">Benevolent</text>
+    <circle cx="${(110 + b * 76).toFixed(1)}" cy="${(100 - sp * 76).toFixed(1)}" r="9" fill="#ffd34d" stroke="#fff" stroke-width="2.5"/>
+  </svg>`;
+  const zig = buildings.list.find((x) => x.def.monument);
+  const e = politics.election;
+  return [
+    {
+      title: '⚖️ Alignment', html: compass,
+      stats: [['You are', morality.label()], ...morality.deeds.slice(0, 3).map((d) => [d.why, d.benevolence + d.spirit >= 0 ? '▲' : '▼'])],
+    },
+    {
+      title: '🗳️ Factions', long: true,
+      bars: politics.KEYS.map((k) => [`${FACTIONS[k].icon} ${FACTIONS[k].label.replace('The ', '')}`, politics.approval[k], 1, tone(politics.approval[k]), pct(politics.approval[k])]),
+      stats: [
+        ['Next election', politics.martialLaw ? 'Suspended' : politics.rigged ? `${politics.daysToElection()} d · arranged` : `in ${politics.daysToElection()} day${politics.daysToElection() === 1 ? '' : 's'}`],
+        ['Last result', e ? `${pct(e.share)}${e.rigged ? ' (rigged)' : ''}` : '—'],
+        ['Martial law', politics.martialLaw ? 'In force' : 'No'],
+      ],
+    },
+    {
+      title: '🏛️ Sovereignty',
+      bars: [
+        ['Palace', politics.palaceHp, 100, tone(politics.palaceHp / 100), `${Math.round(politics.palaceHp)}%`],
+        ['Belief', society.avg.faith, 1, tone(society.avg.faith), pct(society.avg.faith)],
+        ['Monument', zig ? zig.progress : 0, 1, '#ffd34d', zig ? pct(zig.progress) : 'Not begun'],
+      ],
+      stats: [
+        ['Guerrillas', politics.raid ? `${politics.rebels} · RAIDING` : `${politics.rebels}`],
+        ['Plague cases', `${politics.plague}`],
+        ['Victory', 'Build the Ziggurat'],
+      ],
+    },
+  ];
+}
+
 function almanacCards() {
   if (almanacPage === 1 && creature.alive) return creatureCards();
+  if (almanacPage === 2) return politicsCards();
   const S = society, a = S.avg;
   const tone = (v) => (v > 0.6 ? '#7dff7a' : v > 0.35 ? '#ffd34d' : '#ff6b5b');
   const pct = (v) => `${Math.round(v * 100)}%`;
@@ -659,7 +879,7 @@ function almanacCards() {
 }
 
 function updateHints() {
-  if (hud.almanacOpen()) return hud.setHints([['dpad', almanacPage ? 'Economy page' : 'Creature page'], ['options', 'Close']]);
+  if (hud.almanacOpen()) return hud.setHints([['dpad', ['Creature page', 'Politics page', 'Economy page'][almanacPage]], ['options', 'Close']]);
   if (radial.isOpen) return hud.setHints([]);
   if (mode && mode.kind === 'place') return hud.setHints([['cross', `Build ${money(BUILDINGS[mode.type].cost)}`], ['square', 'Rotate'], ['circle', 'Cancel'], ['l2', 'Precision']]);
   if (mode && mode.kind === 'demolish') return hud.setHints([['cross', hoverBuilding ? `Demolish ${hoverBuilding.def.label}` : 'Demolish'], ['circle', 'Done']]);
@@ -714,6 +934,7 @@ function frame(now) {
         ? 'DualShock 4 connected — press <span class="btn cross">✕</span> to rule'
         : 'Keyboard detected — press <b>Enter</b> to rule');
       if (anyPress) {
+        music.start();
         hud.showTitle(false);
         choosing = true;
         hud.choose(SPECIES, pick);
@@ -728,7 +949,10 @@ function frame(now) {
     hud.showTitle(false);
   }
 
-  const playing = started;
+  // Game over / victory screen: Cross restarts after a defeat, or dismisses a victory.
+  const ended = hud.endingOpen();
+  if (ended && pad.pressed.cross) { if (politics.over && politics.over.won) hud.ending(null); else window.location.reload(); }
+  const playing = started && !ended;
   hoverCreature = playing && creature.alive && !hand.held && !mode
     && Math.hypot(hand.pos.x - creature.pos.x, hand.pos.z - creature.pos.z) < creature.radius + 2.5;
   hand.extraHover = hoverCreature ? creature.height - 3 : 0;
@@ -743,9 +967,9 @@ function frame(now) {
     // --- Almanac (Options / touchpad click) --------------------------------------------
     if (pad.pressed.options || pad.pressed.touchpad) {
       if (hud.almanacOpen()) hud.almanac(null);
-      else { radial.close(); hud.almanac(almanacCards()); }
+      else { radial.close(); almanacPage = 0; hud.almanac(almanacCards()); }
     } else if (hud.almanacOpen() && pad.pressed.circle) hud.almanac(null);
-    else if (hud.almanacOpen() && (pad.pressed.left || pad.pressed.right)) { almanacPage = 1 - almanacPage; hud.almanac(almanacCards()); }
+    else if (hud.almanacOpen() && (pad.pressed.left || pad.pressed.right)) { almanacPage = (almanacPage + (pad.pressed.right ? 1 : 2)) % 3; hud.almanac(almanacCards()); }
 
     if (!hud.almanacOpen()) {
       // --- D-pad: game speed + alerts ---------------------------------------------------
@@ -800,11 +1024,14 @@ function frame(now) {
 
   // --- simulate ------------------------------------------------------------------------
   const menuOpen = radial.isOpen || hud.almanacOpen();
-  const timeScale = !playing ? 1 : hud.almanacOpen() ? 0 : radial.isOpen ? 0.12 : speed;
+  const timeScale = ended ? 0 : !playing ? 1 : hud.almanacOpen() ? 0 : radial.isOpen ? 0.12 : speed;
 
   hand.update(realDt, pad, rig, playing && !menuOpen, !mode && !hoverCreature);
   simulate(realDt * timeScale);
   pulses.update(realDt);
+  rain.update(realDt * Math.min(1, timeScale));
+  morality.update(realDt, simTime);
+  music.update(morality.shown, ended || timeScale === 0);
   rig.update(realDt, pad, hand.pos, playing && !menuOpen);
   water.update(simTime, sky.env, rig.focus);
   hud.update(realDt);
@@ -818,6 +1045,7 @@ function frame(now) {
   buildings.render(simTime);
   society.renderIcons(icons);
   creature.renderIcons(icons);
+  politics.renderIcons(icons);
   if (mode && mode.kind === 'demolish' && hoverBuilding) icons.add(hoverBuilding.x, hoverBuilding.y + hoverBuilding.def.h + 5, hoverBuilding.z, 3.4, '🧱');
   icons.end();
 
@@ -845,7 +1073,7 @@ hud.setSpeed(1);
 hud.showTitle(true);
 refreshHud();
 window.__game = {
-  renderer, scene, rig, hand, entities, buildings, society, creature, sky, input, perf, stats, radial,
+  renderer, scene, rig, hand, entities, buildings, society, creature, morality, politics, music, sky, input, perf, stats, radial,
   get hoverCreature() { return hoverCreature; },
   SPECIES,
   get mode() { return mode; },

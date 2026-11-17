@@ -85,6 +85,14 @@ const MODELS = {
     box(0.3, 2, 0.3, 0xe8b530, 0, 14, 4.2), box(1.2, 0.3, 0.3, 0xe8b530, 0, 15.1, 4.2),
     box(1.4, 2.6, 0.2, 0x5a3a22, 0, 0, 5.85), cyl(0.9, 0.9, 0.15, 8, 0x7ec8e3, 0, 6.6, 5.85),
   ]),
+  ziggurat: () => merge([
+    box(16, 3, 16, 0xe8b530, 0, 0, 0), box(12.6, 3, 12.6, 0xf2c94c, 0, 3, 0), box(9.2, 3, 9.2, 0xe8b530, 0, 6, 0), box(5.8, 3, 5.8, 0xf2c94c, 0, 9, 0),
+    box(3.4, 12.2, 3, 0xcfa32a, 0, 0, 6.6, 1),                                                 // grand staircase
+    place(paint(new THREE.SphereGeometry(2.6, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2), 0xd0252b, 0.8), 0, 12, 0),
+    box(7, 1.6, 0.4, 0xd0252b, 0, 12.6, 3.1), box(6.2, 1.0, 0.45, 0xfff3c4, 0, 12.9, 3.15),  // CASINO sign
+    ...[-7, 7].flatMap((x) => [-7, 7].map((z) => cyl(0.5, 0.6, 5, 6, 0xfff3c4, x, 3, z))),
+    ...[-7, 7].flatMap((x) => [-7, 7].map((z) => ball(0.9, 0xff7a2a, x, 8.6, z))),
+  ]),
   outpost: () => merge([
     ...[-1.5, 1.5].flatMap((x) => [-1.5, 1.5].map((z) => cyl(0.2, 0.2, 5, 4, 0x5d4428, x, 0, z))),
     box(4, 0.35, 4, 0x6b5a3a, 0, 5, 0), box(4, 1.0, 0.2, 0x5f6b3a, 0, 5.35, 2), box(4, 1.0, 0.2, 0x5f6b3a, 0, 5.35, -2),
@@ -105,6 +113,7 @@ export const BUILDINGS = {
   tenement: { label: 'Tenement', icon: '🏢', cost: 600, w: 7, d: 7, h: 7, housing: 8, upkeep: 6, desc: 'Homes for 8. Cosy is a state of mind.' },
   clinic: { label: 'Clinic', icon: '🏥', cost: 900, w: 7, d: 6, h: 4, workers: 1, heals: true, upkeep: 14, indoor: true, desc: 'Cures most things. Bills the rest.' },
   cathedral: { label: 'Cathedral', icon: '⛪', cost: 2000, w: 8, d: 13, h: 15, workers: 1, faith: true, upkeep: 16, indoor: true, desc: 'Worshippers here generate Mana fast.' },
+  ziggurat: { label: 'Ziggurat-Casino', icon: '🎰', cost: 9000, w: 17, d: 17, h: 15, upkeep: 0, monument: true, desc: 'The Grand Monument. Finish it to win.' },
   outpost: { label: 'Guard Outpost', icon: '🪖', cost: 800, w: 6, d: 6, h: 8, workers: 2, guard: true, upkeep: 20, desc: 'Protests end sooner. Liberty suffers.' },
 };
 
@@ -331,7 +340,7 @@ export function createBuildings(scene, terrain, scenery, icons, hooks) {
     for (const b of list) {
       if (!b.built) {
         // A site creeps along unattended; builders and dropped crates make it fly.
-        b.progress += (dt * (0.2 + b.present) * 22) / b.def.cost;
+        b.progress += (dt * (0.2 + b.present) * (b.def.monument ? 11 : 22)) / b.def.cost;
         if (b.progress >= 1) { b.progress = 1; b.built = true; hooks.onBuilt(b); }
         continue;
       }

@@ -411,6 +411,7 @@ export function createEntities(scene, terrain, onEvent) {
 
   return {
     wander, goTo, setBrain: (b) => { brain = b; },
+    recolor(o, hex) { if (hex === 0xffffff && o.shirt) o.tint.copy(o.shirt); else { if (!o.shirt) o.shirt = o.tint.clone(); o.tint.set(hex); } dirtyColors[o.type] = true; },
     lists, spawn, remove, update, nearest, forEachNear, launch, shockwave, siesta, clearCargo, populate,
     count: (type) => lists[type].length,
   };

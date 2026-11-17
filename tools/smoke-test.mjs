@@ -147,7 +147,7 @@ check('Circle sets held object down', await game(() => !window.__game.hand.held)
 // R1 wheel -> Move the Sun (sub-wheel) -> Dusk. Miracles cost Mana.
 await game(() => { window.__game.society.mana = 100; });
 await press(B.r1); await wait(200);
-await axes(0, 0, 0, -1); await wait(120); await tap(B.cross);      // "Move the Sun" (item 0)
+await axes(0, 0, -0.434, 0.901); await wait(120); await tap(B.cross); // "Move the Sun" (item 4 of 7)
 await axes(0, 0, -1, 0); await wait(150);                           // 4 items: left = index 3 (Midnight)
 await axes(0, 0, 0, 1); await wait(150);                            // down = index 2 (Dusk)
 await shot('08-wheel-sun');
@@ -159,7 +159,8 @@ await shot('09-dusk');
 // Tremor at the palace.
 await tap(B.triangle);
 check('Triangle snaps to Palace', await game(() => Math.hypot(window.__game.hand.pos.x - 22, window.__game.hand.pos.z - 47.6) < 1));
-await press(B.r1); await wait(200); await axes(0, 0, 1, 0); await wait(150); await tap(B.cross);
+await press(B.r1); await wait(200); await axes(0, 0, -0.975, 0.223); await wait(150); await tap(B.cross); // Tricks (item 5 of 7)
+await axes(0, 0, 0, -1); await wait(150); await tap(B.cross);                                              // Tremor (item 0 of 2)
 await axes(0, 0, 0, 0); await press(B.r1, false); await wait(500);
 check('Tremor miracle fired', await game(() => window.__game.stats.miracles === 2));
 check('miracles spend Mana (15 + 30)', Math.abs((await game(() => window.__game.society.mana)) - 55) < 3);
@@ -268,7 +269,8 @@ await shot('18-inspect-building');
 await tap(B.circle);
 const mana1 = await game(() => window.__game.society.mana);
 await tap(B.cross);
-check('Cross blesses a building for 10 Mana', await game(() => window.__game.buildings.list.at(-1).boost > 0) && Math.abs(mana1 - 10 - await game(() => window.__game.society.mana)) < 2);
+check('Cross blesses a building for 10 Mana', await game(() => window.__game.buildings.list.at(-1).boost > 0) && Math.abs(mana1 - 10 - await game(() => window.__game.society.mana)) < 2,
+  await game(() => { const g = window.__game, b = g.buildings.list.at(-1); return `boost ${b.boost.toFixed(1)}, built ${b.built}, hover ${g.hand.hover && g.hand.hover.type}, creature ${g.hoverCreature}, mana ${g.society.mana.toFixed(1)}/${g.society.manaCap()}`; }) + ` (was ${mana1.toFixed(1)})`);
 
 // L1 -> Demolish (item 5 of 6, up-left), Cross on the building, Circle to leave the mode.
 await press(B.l1); await wait(200);
@@ -353,6 +355,132 @@ check('Almanac shows the Creature weight grid', (await game(() => document.query
 await shot('22-almanac-creature');
 await tap(B.options);
 
+// ---------------------------------------------------------------------------------
+// Phase 4: miracles, edicts, alignment, factions, rebels, elections, endings
+// ---------------------------------------------------------------------------------
+const wheel = async (bumper, picks) => { // picks: [[rx, ry], ...] one per wheel level
+  await game(() => { const S = window.__game.society; S.mana = S.manaCap(); }); // never short of Mana mid-test
+  await press(bumper); await wait(200);
+  for (const [rx, ry] of picks) { await axes(0, 0, rx, ry); await wait(150); await tap(B.cross); }
+  await axes(0, 0, 0, 0); await press(bumper, false); await wait(200);
+};
+await game(() => { const g = window.__game; g.creature.paused = true; g.society.pesos = 20000; g.sky.setHour(11); g.fastForward(20); });
+
+// Rainstorm (R1 item 0) over the plantain farm.
+await game(() => { const g = window.__game, f = g.buildings.list.find((b) => b.type === 'plantain'); f.boost = 0; g.hand.teleport(f.x, f.z); g.rig.snapTo(f.x, f.z); });
+const ben0 = await game(() => window.__game.morality.benevolence);
+await wheel(B.r1, [[0, -1]]);
+check('Rainstorm boosts nearby farms', await game(() => window.__game.buildings.list.find((b) => b.type === 'plantain').boost > 30));
+check('kind miracles raise Benevolence', (await game(() => window.__game.morality.benevolence)) > ben0);
+await wait(300);
+await shot('23-rainstorm');
+
+// Heal Plague (R1 item 1).
+await game(() => {
+  const g = window.__game;
+  for (const c of g.entities.lists.citizen) c.plague = false; // a random outbreak may already be under way
+  g.politics.outbreak(4);
+  const sick = g.entities.lists.citizen.find((c) => c.plague); g.hand.teleport(sick.pos.x, sick.pos.z);
+  window.__patient = sick;
+});
+check('plague outbreak infects islanders', await game(() => window.__game.entities.lists.citizen.filter((c) => c.plague).length === 4));
+await wheel(B.r1, [[0.782, -0.623]]);
+check('Heal Plague cures those under the Hand', await game(() => !window.__patient.plague && window.__patient.needs.health > 0.95));
+await game(() => { for (const c of window.__game.entities.lists.citizen) c.plague = false; });
+
+// Convert (R1 item 2) makes a rebel lay down arms.
+await game(() => {
+  const g = window.__game, c = g.entities.lists.citizen.find((c) => !c.hidden && !c.rebel);
+  g.politics.radicalise(c); g.hand.teleport(c.pos.x, c.pos.z); window.__rebel = c;
+});
+check('islanders can be radicalised', await game(() => window.__rebel.rebel && !window.__rebel.job));
+await wheel(B.r1, [[0.975, 0.223]]);
+check('Convert reforms rebels and restores faith', await game(() => !window.__rebel.rebel && window.__rebel.needs.faith > 0.95));
+
+// Meteor Strike (R1 item 3) flattens a building and darkens the alignment.
+await game(() => {
+  const g = window.__game, s = g.buildings.findSpot('outpost', 18, 34, 60);
+  window.__target = g.buildings.add('outpost', s.x, s.z, s.rot, true);
+  g.hand.teleport(s.x, s.z); g.rig.snapTo(s.x, s.z);
+});
+const ben1 = await game(() => window.__game.morality.benevolence);
+await wheel(B.r1, [[0.434, 0.901]]);
+await game(() => window.__game.fastForward(5));
+check('Meteor Strike ruins the building under the Hand', await game(() => !window.__target.built));
+check('destructive miracles lower Benevolence', (await game(() => window.__game.morality.benevolence)) < ben1);
+await shot('24-meteor');
+
+// Edicts: L1 -> Edicts (item 4 of 6) -> Martial Law (item 3 of 5).
+const junta0 = await game(() => window.__game.politics.mod.junta);
+const edicts0 = await game(() => window.__game.stats.edicts);
+await wheel(B.l1, [[-0.866, 0.5], [-0.588, 0.809]]);
+check('Martial Law edict takes effect', await game(() => { const g = window.__game; return g.politics.martialLaw && g.society.martialLaw; }) && (await game(() => window.__game.stats.edicts)) === edicts0 + 1);
+check('edicts move faction approval', (await game(() => window.__game.politics.mod.junta)) > junta0 + 0.2 && await game(() => window.__game.politics.mod.campesinos < 0));
+await wheel(B.l1, [[-0.866, 0.5], [-0.588, 0.809]]);
+check('Martial Law can be lifted', await game(() => !window.__game.politics.martialLaw));
+
+// Island morphing follows Benevolence.
+await game(() => { const g = window.__game, P = { x: 22, z: 60 }; g.sky.setHour(13); g.morality.benevolence = -1; g.hand.teleport(P.x, P.z); g.rig.snapTo(P.x, P.z); g.rig.pitch = 0.5; });
+await wait(4500);
+check('ruthless rule morphs the island (smog, spikes)', await game(() => { const g = window.__game; return g.morality.shown < -0.7 && g.scene.getObjectByName('ruthless-dressing').visible && g.scene.fog.near < 120; }));
+await shot('25-ruthless');
+await game(() => { window.__game.morality.benevolence = 1; });
+await wait(6000);
+check('benevolent rule morphs it back (sunbeams)', await game(() => { const g = window.__game; return g.morality.shown > 0.7 && g.scene.getObjectByName('sunbeams').visible && !g.scene.getObjectByName('ruthless-dressing').visible; }));
+await shot('26-benevolent');
+await game(() => { window.__game.morality.benevolence = 0.1; window.__game.rig.pitch = 0.78; });
+
+// Re-education: a rebel dropped on a cathedral reforms.
+check('rebel dropped on a cathedral is re-educated', await game(() => {
+  const g = window.__game, s = g.buildings.findSpot('cathedral', 18, 34, 40);
+  const church = g.buildings.add('cathedral', s.x, s.z, s.rot, true);
+  const c = g.entities.lists.citizen.find((c) => !c.hidden && !c.rebel);
+  g.politics.radicalise(c);
+  c.pos.set(church.x, church.y + 5, church.z); g.entities.launch(c, 0, 0, 0);
+  g.fastForward(3);
+  return !c.rebel;
+}));
+
+// Guerrillas gather and raid the palace.
+await game(() => {
+  const g = window.__game;
+  g.entities.lists.citizen.filter((c) => !c.rebel).slice(0, 7).forEach((c) => g.politics.radicalise(c));
+  g.sky.setHour(9);
+  for (let i = 0; i < 60 && g.politics.palaceHp > 90; i++) g.fastForward(5);
+});
+check('rebels raid and damage the palace', await game(() => window.__game.politics.palaceHp <= 90), `palace ${await game(() => Math.round(window.__game.politics.palaceHp))}%`);
+await wait(300);
+await shot('27-raid');
+await game(() => { const g = window.__game; for (const c of g.entities.lists.citizen) g.politics.reform(c); g.fastForward(5); });
+check('raid ends when the rebels are gone', await game(() => !window.__game.politics.raid));
+
+// Elections.
+check('a rigged election is always won', await game(() => {
+  const g = window.__game; g.politics.rigged = true; g.politics.endOfDay(4);
+  return g.politics.election.won && g.politics.election.rigged && g.politics.election.share > 0.89 && !g.politics.rigged;
+}));
+
+// Almanac page 3.
+await tap(B.options); await wait(300);
+await tap(B.right); await tap(B.right); await wait(400);
+check('Almanac shows alignment and factions', await game(() => !!document.querySelector('.compass') && document.getElementById('almanac-cards').textContent.includes('Campesinos')));
+await shot('28-almanac-politics');
+await tap(B.options);
+
+// Victory: finishing the Ziggurat-Casino.
+await game(() => {
+  const g = window.__game, s = g.buildings.findSpot('ziggurat', 18, 34, 40);
+  const z = g.buildings.add('ziggurat', s.x, s.z, s.rot); z.progress = 0.995;
+  g.hand.teleport(s.x + 16, s.z + 16); g.rig.snapTo(s.x, s.z); g.fastForward(30);
+});
+await wait(300);
+check('completing the Ziggurat-Casino wins the game', await game(() => window.__game.politics.over && window.__game.politics.over.won && !document.getElementById('ending').hidden));
+await shot('29-victory');
+await tap(B.cross);
+check('Cross dismisses the victory screen and play continues', await game(() => document.getElementById('ending').hidden));
+await wait(300);
+await shot('30-ziggurat');
+
 // Midnight render + budget checks.
 await game(() => window.__game.sky.setHour(0)); await wait(300);
 await shot('13-midnight');
@@ -369,6 +497,19 @@ const minFont = await game(() => {
 });
 check('no HUD text below 24px at 1080p', minFont * (1080 / H) >= 24, `smallest ${(minFont * (1080 / H)).toFixed(1)}px @1080p`);
 check('no runtime errors', errors.length === 0, errors.join(' | '));
+
+// Defeat, last of all (Cross on that screen restarts the game): an honest election with a miserable electorate.
+await game(() => {
+  const g = window.__game; g.politics.over = null;
+  for (const c of g.entities.lists.citizen) c.mood = 0.1;
+  g.politics.endOfDay(8);
+});
+await wait(200);
+check('losing an election ends the game', await game(() => { const o = window.__game.politics.over; return o && !o.won && o.title === 'Voted Out' && !document.getElementById('ending').hidden; }));
+const hourA = await game(() => window.__game.sky.env.hour);
+await wait(600);
+check('the world stops after defeat', (await game(() => window.__game.sky.env.hour)) === hourA);
+await shot('31-defeat');
 
 await browser.close();
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');

@@ -63,3 +63,16 @@ export function merge(geometries) {
 
 /** Shared material for everything vertex-coloured. One material = fewer state changes. */
 export const vertexLit = new THREE.MeshLambertMaterial({ vertexColors: true });
+
+/** Island mood, -1 (ruthless: ashen, drained) .. +1 (benevolent: lush, saturated). */
+export const morph = { value: 0 };
+vertexLit.onBeforeCompile = (shader) => {
+  shader.uniforms.uMorph = morph;
+  shader.fragmentShader = 'uniform float uMorph;\n' + shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+    {
+      float lum = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+      vec3 ash = mix(diffuseColor.rgb, vec3(lum) * vec3(0.78, 0.64, 0.6), 0.8);
+      vec3 lush = mix(vec3(lum), diffuseColor.rgb, 1.2) * vec3(1.0, 1.05, 1.0);
+      diffuseColor.rgb = uMorph < 0.0 ? mix(diffuseColor.rgb, ash, -uMorph) : mix(diffuseColor.rgb, max(lush, 0.0), uMorph);
+    }`);
+};

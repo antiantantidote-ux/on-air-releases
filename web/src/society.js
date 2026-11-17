@@ -23,6 +23,7 @@ export function createSociety(entities, buildings, terrain, sky, hooks) {
     exported: 0, deaths: 0, arrivals: 0,
     avg: { food: 1, housing: 0, health: 1, liberty: 1, faith: 1, mood: 0.6 },
     employed: 0, homeless: 0, protesters: 0,
+    martialLaw: false, raidDamage: 0, prayed: 0, override: null, factionBonus: null,
   };
   const citizens = entities.lists.citizen;
   let lastDay = sky.env.day, jobTimer = 0, sampleTimer = 0, immigrationTimer = 30;
@@ -36,13 +37,14 @@ export function createSociety(entities, buildings, terrain, sky, hooks) {
 
   // --- needs -----------------------------------------------------------------------------
   const guards = () => buildings.built((b) => b.def.guard && b.present > 0).length;
-  S.liberty = (o) => clamp(0.85 - 0.09 * guards() - o.trauma, 0, 1);
+  S.liberty = (o) => clamp(0.85 - 0.09 * guards() - o.trauma - (S.martialLaw ? 0.3 : 0), 0, 1);
   S.needsOf = (o) => ({
     food: o.needs.food, housing: o.home ? 1 : 0.15, health: o.needs.health, liberty: S.liberty(o), faith: o.needs.faith,
   });
   S.mood = (o) => {
     const n = S.needsOf(o);
-    return n.food * WEIGHTS.food + n.housing * WEIGHTS.housing + n.health * WEIGHTS.health + n.liberty * WEIGHTS.liberty + n.faith * WEIGHTS.faith;
+    return n.food * WEIGHTS.food + n.housing * WEIGHTS.housing + n.health * WEIGHTS.health + n.liberty * WEIGHTS.liberty + n.faith * WEIGHTS.faith
+      + (S.factionBonus ? S.factionBonus(o) : 0);
   };
   /** The Hand's rough handling is remembered. */
   S.traumatise = (o, amount) => { if (o.type === 'citizen') o.trauma = clamp(o.trauma + amount, 0, 0.8); };
@@ -64,6 +66,7 @@ export function createSociety(entities, buildings, terrain, sky, hooks) {
     o.job = null;
   }
   /** `force` is the Hand's prerogative: a full workplace sacks someone to make room. */
+  S.quitJob = (o) => quitJob(o);
   S.assignJob = (o, b, force = false) => {
     if (!b.built || !b.def.workers || o.job === b) return false;
     if (b.workers.length >= b.def.workers) {
@@ -92,6 +95,7 @@ export function createSociety(entities, buildings, terrain, sky, hooks) {
   const brain = {
     decide(o) {
       if (o.task) release(o);
+      if (S.override && S.override(o, start)) return; // politics.js: rebels have other plans
       const n = o.needs, hour = sky.env.hour, night = hour >= 21.5 || hour < 5;
       const P = SITES.palace;
 
@@ -105,11 +109,11 @@ export function createSociety(entities, buildings, terrain, sky, hooks) {
         if (farm) return start(o, 'eat', farm, farm.door.x, farm.door.z);
         if (S.pantry > 0) return start(o, 'eat', null, P.x + (rnd() - 0.5) * 8, P.z + P.r * 0.55);
       }
-      if (n.health < 0.4) {
+      if (n.health < 0.4 || o.plague) {
         const clinic = buildings.nearest(o.pos.x, o.pos.z, (b) => b.built && b.def.heals && b.present > 0);
         if (clinic) return start(o, 'heal', clinic, clinic.door.x, clinic.door.z);
       }
-      if (o.mood < 0.33 && rnd() < 0.6) {
+      if (o.mood < 0.33 && !S.martialLaw && rnd() < 0.6) {
         const a = rnd() * Math.PI * 2;
         return start(o, 'protest', null, P.x + Math.cos(a) * P.r * 0.7, P.z + Math.sin(a) * P.r * 0.7);
       }
@@ -139,6 +143,8 @@ export function createSociety(entities, buildings, terrain, sky, hooks) {
         case 'pray': t.t = 10; o.hidden = !!b; break;
         case 'sleep': o.hidden = !!b; t.t = 1e9; break;
         case 'protest': t.t = 26 / (1 + guards()); break;
+        case 'lurk': t.t = 6 + rnd() * 4; break;
+        case 'raid': t.t = 7; break;
         case 'haul':
           buildings.deliver(b, o.carry.good, o.carry.n);
           o.carry = null;
@@ -185,12 +191,21 @@ export function createSociety(entities, buildings, terrain, sky, hooks) {
           }
           break;
         case 'heal':
-          if (t.t <= 0) { o.needs.health = 1; return rest(o, 0.5); }
+          if (t.t <= 0) { o.needs.health = 1; o.plague = false; return rest(o, 0.5); }
           break;
         case 'pray':
           S.mana = Math.min(S.manaCap(), S.mana + dt * (b ? 0.55 : 0.14));
+          S.prayed += dt;
           o.needs.faith = Math.min(1, o.needs.faith + dt / 9);
           if (t.t <= 0) return rest(o, 0.5);
+          break;
+        case 'lurk':
+          if (t.t <= 0) return rest(o, 0.4);
+          break;
+        case 'raid': // each rebel at the gates chips away at the palace
+          S.raidDamage += dt;
+          o.pos.y += Math.abs(Math.sin(time * 8 + o.id)) * 0.4;
+          if (t.t <= 0) return rest(o, 0.2);
           break;
         case 'sleep': {
           const hour = sky.env.hour;
@@ -227,6 +242,7 @@ export function createSociety(entities, buildings, terrain, sky, hooks) {
       n.food = Math.max(0, n.food - dt * FOOD_DECAY * asleep);
       n.faith = Math.max(0, n.faith - dt * FAITH_DECAY);
       // Without a clinic people get run-down (and unhappy) but only starvation is fatal.
+      if (o.plague) n.health = Math.max(0, n.health - dt / 240); // about two minutes to find a cure
       if (n.food <= 0) n.health = Math.max(0, n.health - dt / 70);
       else if (n.health > UNTREATED_FLOOR) n.health = Math.max(UNTREATED_FLOOR, n.health - dt * HEALTH_DECAY);
       o.trauma = Math.max(0, o.trauma - dt / 500);
@@ -257,7 +273,7 @@ export function createSociety(entities, buildings, terrain, sky, hooks) {
           const home = buildings.nearest(o.pos.x, o.pos.z, (b) => b.built && b.def.housing && b.residents.length < b.def.housing);
           if (home) { o.home = home; home.residents.push(o); }
         }
-        if (!o.job) {
+        if (!o.job && !o.rebel) {
           const job = buildings.nearest(o.pos.x, o.pos.z, (b) => b.built && b.def.workers && b.workers.length < b.def.workers);
           if (job) S.assignJob(o, job);
         }
@@ -303,10 +319,11 @@ export function createSociety(entities, buildings, terrain, sky, hooks) {
       if (o.hidden) continue;
       let icon = null;
       const kind = o.task && o.state === 'act' ? o.task.kind : null;
-      if (kind === 'protest') icon = '✊';
+      if (o.rebel) icon = '🚩';
+      else if (kind === 'protest') icon = '✊';
       else if (kind === 'pray') icon = '🙏';
       else if (kind === 'sleep' || o.state === 'siesta') icon = '💤';
-      else if (o.needs.health < 0.3) icon = '🤒';
+      else if (o.plague || o.needs.health < 0.3) icon = '🤒';
       else if (o.needs.food < 0.2) icon = '🍌';
       else if (o.carry) icon = '📦';
       if (icon) icons.add(o.pos.x, o.pos.y + 3.4, o.pos.z, 1.7, icon);
@@ -316,8 +333,8 @@ export function createSociety(entities, buildings, terrain, sky, hooks) {
   S.describe = (o) => {
     const k = o.task ? o.task.kind : null;
     const where = o.task && o.task.b ? o.task.b.def.label : '';
-    if (o.state === 'walk') return { work: `Off to work`, haul: `Hauling ${o.carry ? GOODS[o.carry.good].label.toLowerCase() : 'goods'}`, eat: 'Looking for food', pray: 'Going to pray', sleep: 'Heading to bed', heal: 'Going to the clinic', protest: 'Marching on the palace', build: 'Off to the building site' }[k] || 'Out for a stroll';
-    if (o.state === 'act') return { work: `Working · ${where}`, build: `Building · ${where}`, eat: 'Eating', pray: 'Praying', sleep: 'Asleep', heal: 'Being treated', protest: 'Protesting!' }[k] || 'Loitering';
+    if (o.state === 'walk') return { work: `Off to work`, haul: `Hauling ${o.carry ? GOODS[o.carry.good].label.toLowerCase() : 'goods'}`, eat: 'Looking for food', pray: 'Going to pray', sleep: 'Heading to bed', heal: 'Going to the clinic', protest: 'Marching on the palace', build: 'Off to the building site', lurk: 'Slipping into the jungle', raid: 'Marching on the palace' }[k] || 'Out for a stroll';
+    if (o.state === 'act') return { work: `Working · ${where}`, build: `Building · ${where}`, eat: 'Eating', pray: 'Praying', sleep: 'Asleep', heal: 'Being treated', protest: 'Protesting!', lurk: 'Plotting at the rebel camp', raid: 'Storming the palace!' }[k] || 'Loitering';
     return { idle: 'Thinking', siesta: 'Napping by decree', swim: 'Swimming for it', dazed: 'Seeing stars', held: 'Dangling', air: 'Airborne' }[o.state] || '';
   };
 

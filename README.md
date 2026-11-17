@@ -4,7 +4,7 @@ A god-game / banana-republic dictator sim for **Android TV**, played entirely wi
 **DualShock 4**. You are the ancient island deity of San Milagro, who has discovered that
 rigged elections scale better than blood sacrifice.
 
-**Status: Phase 3 of 4**
+**Status: all four phases complete (vertical slice)**
 
 - Phase 1 — engine, island, water, day/night, the Divine Hand (grab / throw), orbit camera,
   radial-wheel framework, 10-foot HUD.
@@ -13,6 +13,8 @@ rigged elections scale better than blood sacrifice.
   state machine, the Peso and Mana loops, costed miracles and edicts.
 - Phase 3 — El Mascota Supremo: choose a giant Capybara, Jaguar or Macaw, which hatches at the
   Nest and acts on its own. Pet it (Square) or slap it (Circle) to reshape its behaviour.
+- Phase 4 — two alignment axes that morph the island, the full miracle and edict sets, four
+  factions, guerrillas, elections, plague, procedural music, and win/lose endings.
 
 ## Stack
 
@@ -51,7 +53,7 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 | ○ | Close card / set down the held object / cancel blueprint or demolish mode. **Over the Creature: slap** |
 | △ | Snap to Palace ↔ Creature |
 | D-pad | ← pause · ↑ 1× · → 2× · ↓ replay advisor alerts |
-| Options / touchpad click | Almanac del Presidente (D-pad ←/→ flips between the economy and the Creature's mind) |
+| Options / touchpad click | Almanac del Presidente (D-pad ←/→ flips between the economy, the Creature's mind, and politics) |
 
 Keyboard mirror for desk debugging: WASD = left stick, arrows = right stick, Space = R2,
 Shift = L2, Q/E = L1/R1, Enter = ✕, F = □, Esc = ○, T = △, 1/2/3/4 = D-pad ←/↑/→/↓, Tab = Options.
@@ -66,6 +68,26 @@ Shift = L2, Q/E = L1/R1, Enter = ✕, F = □, Esc = ○, T = △, 1/2/3/4 = D-p
   throwing them costs Liberty.
 - **The Hand is part of the economy**: drop a crate on a building site for +25% progress, drop
   cargo on the dock to export it, drop an islander on a workplace to give them that job.
+
+## Alignment, politics and how it ends
+
+- **Alignment** has two axes: Benevolent ↔ Ruthless and Spiritual ↔ Corrupt. Healing, rain,
+  clinics and blessings push one way; meteors, martial law, dunking citizens and a man-eating
+  Creature push the other. Rigged elections and taxes are Corrupt; cathedrals are Spiritual.
+- **Island morphing** follows Benevolence: lush saturated foliage, turquoise water and sunbeams
+  on the palace — or ashen land, murky water, smog, obsidian spikes and loudspeakers. The
+  procedural score cross-fades between a salsa and a brass march.
+- **Miracles (R1, Mana):** Rainstorm, Heal Plague, Convert, Meteor Strike, Move the Sun, Tricks.
+- **Edicts (L1, Pesos):** Free Rum Rations, Mardi Gras Tax, Mandatory Siesta, Martial Law,
+  Rigged Elections.
+- **Factions:** Campesinos, Industrialists, the Devout and the Junta each have an approval
+  rating driven by the state of the island and by your edicts. A faction left under 25% loses
+  members to the **guerrillas**, who camp in the jungle and raid the palace in groups of five.
+  Pluck rebels out by Hand, drop them on a cathedral to re-educate them, Convert them, or
+  let the guards and the Creature deal with them.
+- **Elections** are held every fourth midnight unless rigged or suspended by martial law.
+- **You win** by completing the Golden Ziggurat-Casino (L1 → Civic, $9,000).
+  **You lose** if you are voted out, the palace falls to a raid, or Faith collapses.
 
 ## How the Creature learns
 
@@ -99,6 +121,9 @@ plantains, eat a citizen, smash a building, scare protesters, sleep, play.
 | `society.js` | Islander needs and task state machine, jobs, housing, immigration, Peso/Mana ledger |
 | `icons.js` | World-space status icons and progress bars (one instanced draw call) |
 | `creature.js` | The three Creature models, drive/action utility AI, weight matrix and pet/slap learning |
+| `morality.js` | Alignment axes, island morphing (shader mood uniform, palace dressing), rain effect |
+| `politics.js` | Factions, guerrillas and raids, elections, plague, win/lose conditions |
+| `music.js` | Procedural Web Audio score that follows alignment |
 | `hand.js` | The glove, grab/throw state machine, ground decals |
 | `camera.js` | Deadzone-follow orbit rig |
 | `radial.js` | Data-driven radial wheel (sub-wheels supported) |
@@ -115,4 +140,4 @@ the minimum-font-size rule.
 1. **Engine, island, camera, DS4 Hand** — done
 2. **City building, citizens, Peso/Mana economy** — done
 3. **The Creature and its reinforcement learning** — done
-4. Morality morphing, costed miracles and edicts, factions, advisors
+4. **Morality morphing, miracles, edicts, factions, endings** — done

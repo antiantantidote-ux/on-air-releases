@@ -4,7 +4,7 @@
 import * as THREE from './three.js';
 
 const EMOJI = ['👷', '⛔', '📦', '🏗️', '🍌', '🤒', '🏚️', '🙏', '✊', '💤', '✨', '💰', '🚢', '❓', '🧱', '⚡',
-  '❤️', '💢', '💧', '🎵', '📣', '😈', '💥', '😱', '⚽', '🐾'];
+  '❤️', '💢', '💧', '🎵', '📣', '😈', '💥', '😱', '⚽', '🐾', '🚩'];
 const GRID = 6, CELL = 96, CAPACITY = 192;
 
 export function createIcons(scene) {

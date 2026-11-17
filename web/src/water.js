@@ -96,9 +96,21 @@ export function createWater(terrain, env, fog) {
   mesh.name = 'water';
   mesh.frustumCulled = false;
 
+  const CLEAR = [new THREE.Color(0x3fe0d0), new THREE.Color(0x0b4f8a)];
+  const MURK = [new THREE.Color(0x7c8a5e), new THREE.Color(0x1f3330)];
+  const LAGOON = [new THREE.Color(0x4ff0de), new THREE.Color(0x0a5aa6)];
+
   return {
     mesh,
+    /** Island mood: -1 murky and oily .. +1 postcard turquoise. */
+    setMorph(v) {
+      const to = v < 0 ? MURK : LAGOON, k = Math.abs(v);
+      material.uniforms.uShallow.value.copy(CLEAR[0]).lerp(to[0], k);
+      material.uniforms.uDeep.value.copy(CLEAR[1]).lerp(to[1], k);
+    },
     update(time, env, focus) {
+      material.uniforms.uFogNear.value = fog.near;
+      material.uniforms.uFogFar.value = fog.far;
       material.uniforms.uTime.value = time;
       material.uniforms.uDaylight.value = env.daylight;
       // keep the dense part of the grid under the camera, snapped so waves don't swim

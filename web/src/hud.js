@@ -98,7 +98,7 @@ export function createHud() {
       return `<svg class="chart" viewBox="0 0 300 100" preserveAspectRatio="none"><polyline points="0,100 ${pts} 300,100" fill="${c.color}33" stroke="none"/><polyline points="${pts}" fill="none" stroke="${c.color}" stroke-width="3" vector-effect="non-scaling-stroke"/></svg><div class="chart-caption">${c.caption}</div>`;
     };
     $('almanac-cards').innerHTML = cards.map((c) =>
-      `<div class="card${c.wide ? ' wide' : ''}"><h2>${c.title}</h2>${c.chart ? chart(c.chart) : ''}${c.html || ''}${(c.bars || []).map(bar).join('')}${(c.stats || []).map(stat).join('')}</div>`).join('');
+      `<div class="card${c.wide ? ' wide' : ''}${c.long ? ' long' : ''}"><h2>${c.title}</h2>${c.chart ? chart(c.chart) : ''}${c.html || ''}${(c.bars || []).map(bar).join('')}${(c.stats || []).map(stat).join('')}</div>`).join('');
     $('almanac').hidden = false;
   };
 
@@ -109,6 +109,17 @@ export function createHud() {
       `<div class="pick${i === index ? ' selected' : ''}"><div class="pick-icon">${o.icon}</div><div class="name">${o.title}</div><div class="pick-name">“${o.name}”</div><div class="text">${o.blurb}</div></div>`).join('');
     $('choose').hidden = false;
   };
+
+  hud.ending = (over) => {
+    if (!over) { $('ending').hidden = true; return; }
+    $('ending').className = over.won ? 'won' : 'lost';
+    $('ending-kicker').textContent = over.won ? 'Victory' : 'Your reign is over';
+    $('ending-title').textContent = over.title;
+    $('ending-text').textContent = over.text;
+    $('ending-hint').innerHTML = `<span class="btn cross">✕</span> ${over.won ? 'Keep ruling' : 'Begin a new reign'}`;
+    $('ending').hidden = false;
+  };
+  hud.endingOpen = () => !$('ending').hidden;
 
   hud.setResources = (r) => {
     $('pesos').textContent = `💰 ${r.pesos < 0 ? '−' : ''}$${Math.abs(Math.round(r.pesos)).toLocaleString('en-US')}`;

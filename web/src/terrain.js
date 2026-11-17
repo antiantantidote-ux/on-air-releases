@@ -2,6 +2,7 @@
 // building sites, per-face vertex colours and baked ambient occlusion.
 import * as THREE from './three.js';
 import { makeNoise2D, fbm, clamp, lerp, smoothstep } from './noise.js';
+import { vertexLit } from './geo.js';
 
 export const WORLD = {
   size: 360,       // world units across the simulated square
@@ -146,7 +147,7 @@ export function createTerrain(seed = 1961) {
   geometry.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
   geometry.computeBoundingSphere();
-  const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  const mesh = new THREE.Mesh(geometry, vertexLit);
   mesh.name = 'terrain';
   mesh.matrixAutoUpdate = false;
 
