@@ -22,6 +22,7 @@ export function createHud() {
   const hud = {};
   const seen = new Set();
   const queue = [], history = [];
+  let lastTitle = '';
   let advisorTimer = 0, historyCursor = -1, lastHints = '', toastTimer = 0;
 
   hud.setClock = (day, clock, daylight) => {
@@ -82,7 +83,7 @@ export function createHud() {
 
   hud.showTitle = (show, status) => {
     $('title').hidden = !show;
-    if (status) $('title-status').innerHTML = status;
+    if (status && status !== lastTitle) { $('title-status').innerHTML = status; lastTitle = status; }
   };
 
   /** cards: [{ title, stats: [[label, value]], bars: [[label, value, max, color, text]], chart: { values, color, caption } }] */

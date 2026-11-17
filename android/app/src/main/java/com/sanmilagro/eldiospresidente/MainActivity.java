@@ -3,6 +3,7 @@ package com.sanmilagro.eldiospresidente;
 import android.app.Activity;
 import android.os.Bundle;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.WebResourceRequest;
@@ -15,12 +16,14 @@ import androidx.webkit.WebViewAssetLoader;
 
 /**
  * Thin Android TV shell: a fullscreen, hardware-accelerated WebView that loads the game
- * from APK assets. The DualShock 4 reaches the game through Chromium's Gamepad API, so
- * there is no input code here beyond keeping Android from stealing the buttons.
+ * from APK assets. Gamepad input is read natively by {@link GamepadBridge} and exposed to
+ * the game as {@code window.AndroidPad}, because the WebView's own Gamepad API does not
+ * reliably receive controller events on Android TV.
  */
 public class MainActivity extends Activity {
     private static final String START_URL = "https://appassets.androidplatform.net/assets/index.html";
     private WebView webView;
+    private GamepadBridge gamepad;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -32,6 +35,8 @@ public class MainActivity extends Activity {
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
                 .build();
 
+        gamepad = new GamepadBridge(this);
+
         webView = new WebView(this);
         webView.setBackgroundColor(0xFF0B1020);
         WebSettings settings = webView.getSettings();
@@ -40,6 +45,7 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
+        webView.addJavascriptInterface(gamepad, "AndroidPad");
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
@@ -64,23 +70,24 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Android maps DS4 Circle to BACK when a gamepad button goes unhandled, which would
-     * quit the game every time the player cancels a menu. Gamepad-sourced BACK/B presses
-     * stay inside the WebView; the TV remote's BACK button still exits.
+     * Every key event from a gamepad is consumed here and recorded for the game. That also
+     * stops Android from turning Circle into BACK (which would quit) or the D-pad into focus
+     * navigation. The TV remote's keys are not from a gamepad and pass through as normal.
      */
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        int code = event.getKeyCode();
-        boolean fromGamepad = (event.getSource() & android.view.InputDevice.SOURCE_GAMEPAD)
-                == android.view.InputDevice.SOURCE_GAMEPAD;
-        if (fromGamepad && (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_BUTTON_B)) {
-            webView.dispatchKeyEvent(event);
-            return true;
-        }
+        if (gamepad.onKey(event)) return true;
         return super.dispatchKeyEvent(event);
+    }
+
+    /** Sticks, analog triggers and the D-pad hat. */
+    @Override
+    public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        if (gamepad.onMotion(event)) return true;
+        return super.dispatchGenericMotionEvent(event);
     }
 
     @Override protected void onPause() { super.onPause(); webView.onPause(); }
     @Override protected void onResume() { super.onResume(); webView.onResume(); }
-    @Override protected void onDestroy() { webView.destroy(); super.onDestroy(); }
+    @Override protected void onDestroy() { gamepad.release(); webView.destroy(); super.onDestroy(); }
 }

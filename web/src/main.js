@@ -930,9 +930,12 @@ function frame(now) {
       }
     } else if (input.anyInput()) {
       const anyPress = Object.values(pad.pressed).some(Boolean);
-      hud.showTitle(true, pad.connected
+      // The small diagnostic line tells a tester which input path is alive on their TV.
+      const via = { android: 'Android input', gamepad: 'browser gamepad', keyboard: 'keyboard / remote', none: 'waiting for input' }[pad.source];
+      const diag = `<br><small class="diag">${via}${pad.source === 'android' ? ` · ${pad.nativeEvents} events` : ''}${pad.lastButton ? ` · last button: ${pad.lastButton.toUpperCase()}` : ''}</small>`;
+      hud.showTitle(true, (pad.connected
         ? 'DualShock 4 connected — press <span class="btn cross">✕</span> to rule'
-        : 'Keyboard detected — press <b>Enter</b> to rule');
+        : 'Press <span class="btn cross">✕</span> or <b>Enter</b> to rule') + diag);
       if (anyPress) {
         music.start();
         hud.showTitle(false);

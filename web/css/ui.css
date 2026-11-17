@@ -153,3 +153,4 @@ body {
 .compass line { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1.5; }
 .card.long .bar-row.wide > span { width: 9.8rem; white-space: nowrap; }
 .card.long .bar-row > b { width: 3.4rem; }
+#title-status .diag { font-size: 1rem; font-weight: 600; opacity: 0.75; animation: none; }

@@ -1,6 +1,9 @@
-// DualShock 4 input layer over the W3C Gamepad API (what an Android TV WebView exposes).
-// Produces a normalised per-frame snapshot with edge detection, radial deadzones and
-// rumble. A keyboard mapping mirrors every control so the game is debuggable on a desk.
+// DualShock 4 input layer. Three sources are merged every frame:
+//  1. window.AndroidPad — the Android TV app reads the controller natively (GamepadBridge.java),
+//     because Android WebViews list gamepads but often never deliver their events;
+//  2. the W3C Gamepad API — desktop browsers;
+//  3. the keyboard — desk debugging, and the TV remote's D-pad / OK button.
+// Produces a normalised per-frame snapshot with edge detection, radial deadzones and rumble.
 
 const BUTTONS = [
   'cross', 'circle', 'square', 'triangle', 'l1', 'r1', 'l2', 'r2',
@@ -39,6 +42,7 @@ export function createInput() {
   const state = {
     lx: 0, ly: 0, rx: 0, ry: 0, l2: 0, r2: 0,
     connected: false, padName: '', usingKeyboard: false,
+    source: 'none', lastButton: '', nativeEvents: 0,
     down: {}, pressed: {}, released: {},
   };
   for (const b of BUTTONS) { state.down[b] = false; state.pressed[b] = false; state.released[b] = false; }
@@ -67,55 +71,79 @@ export function createInput() {
 
   const raw = {};
   const key = (...codes) => codes.some((c) => keys.has(c));
+  const bridge = typeof window.AndroidPad === 'object' && window.AndroidPad && typeof window.AndroidPad.state === 'function' ? window.AndroidPad : null;
+
+  /** Native controller state from the Android app, or null. */
+  function nativePad() {
+    if (!bridge) return null;
+    let s;
+    try { s = String(bridge.state()); } catch { return null; }
+    const [bits, axes, connected, events, last, name] = s.split('|');
+    const a = (axes || '').split(',').map(Number);
+    return {
+      buttons: bits || '', lx: a[0] || 0, ly: a[1] || 0, rx: a[2] || 0, ry: a[3] || 0, l2: a[4] || 0, r2: a[5] || 0,
+      connected: connected === '1', events: Number(events) || 0, last: last || '', name: name || '',
+    };
+  }
+  const bigger = (a, b) => (Math.abs(b) > Math.abs(a) ? b : a);
 
   function poll() {
     for (const b of BUTTONS) raw[b] = false;
     let lx = 0, ly = 0, rx = 0, ry = 0, l2 = 0, r2 = 0;
 
     const pad = activePad();
-    state.connected = !!pad;
-    state.padName = pad ? pad.id : '';
+    const native = nativePad();
+    state.connected = !!pad || !!(native && native.connected);
+    state.padName = native && native.connected ? native.name : pad ? pad.id : '';
+    state.source = native && native.connected ? 'android' : pad ? 'gamepad' : anyKeySeen ? 'keyboard' : 'none';
+    if (native) {
+      state.nativeEvents = native.events;
+      if (native.last) state.lastButton = native.last;
+      BUTTONS.forEach((name, i) => { if (native.buttons[i] === '1') raw[name] = true; });
+      lx = native.lx; ly = native.ly; rx = native.rx; ry = native.ry; l2 = native.l2; r2 = native.r2;
+    }
     if (pad) {
       const isRawSony = pad.mapping !== 'standard' && /054c|sony|wireless controller/i.test(pad.id);
       if (isRawSony) {
         const A = RAW_DS4.axes;
-        RAW_DS4.buttons.forEach((name, i) => { raw[name] = !!(pad.buttons[i] && pad.buttons[i].pressed); });
-        lx = pad.axes[A.lx] || 0; ly = pad.axes[A.ly] || 0;
-        rx = pad.axes[A.rx] || 0; ry = pad.axes[A.ry] || 0;
-        l2 = pad.axes[A.l2] !== undefined ? (pad.axes[A.l2] + 1) / 2 : raw.l2 ? 1 : 0;
-        r2 = pad.axes[A.r2] !== undefined ? (pad.axes[A.r2] + 1) / 2 : raw.r2 ? 1 : 0;
+        RAW_DS4.buttons.forEach((name, i) => { if (pad.buttons[i] && pad.buttons[i].pressed) raw[name] = true; });
+        lx = bigger(lx, pad.axes[A.lx] || 0); ly = bigger(ly, pad.axes[A.ly] || 0);
+        rx = bigger(rx, pad.axes[A.rx] || 0); ry = bigger(ry, pad.axes[A.ry] || 0);
+        l2 = Math.max(l2, pad.axes[A.l2] !== undefined ? (pad.axes[A.l2] + 1) / 2 : raw.l2 ? 1 : 0);
+        r2 = Math.max(r2, pad.axes[A.r2] !== undefined ? (pad.axes[A.r2] + 1) / 2 : raw.r2 ? 1 : 0);
         const hat = pad.axes[A.hat];
         if (hat !== undefined && hat <= 1.01) { // 8-way hat encoded as -1..1 in 2/7 steps
           const dir = Math.round((hat + 1) * 3.5);
-          raw.up = dir === 7 || dir === 0 || dir === 1;
-          raw.right = dir >= 1 && dir <= 3;
-          raw.down = dir >= 3 && dir <= 5;
-          raw.left = dir >= 5 && dir <= 7;
+          raw.up = raw.up || dir === 7 || dir === 0 || dir === 1;
+          raw.right = raw.right || (dir >= 1 && dir <= 3);
+          raw.down = raw.down || (dir >= 3 && dir <= 5);
+          raw.left = raw.left || (dir >= 5 && dir <= 7);
         }
       } else {
-        STANDARD.forEach((name, i) => { raw[name] = !!(pad.buttons[i] && pad.buttons[i].pressed); });
-        lx = pad.axes[0] || 0; ly = pad.axes[1] || 0;
-        rx = pad.axes[2] || 0; ry = pad.axes[3] || 0;
-        l2 = pad.buttons[6] ? pad.buttons[6].value : 0;
-        r2 = pad.buttons[7] ? pad.buttons[7].value : 0;
+        STANDARD.forEach((name, i) => { if (pad.buttons[i] && pad.buttons[i].pressed) raw[name] = true; });
+        lx = bigger(lx, pad.axes[0] || 0); ly = bigger(ly, pad.axes[1] || 0);
+        rx = bigger(rx, pad.axes[2] || 0); ry = bigger(ry, pad.axes[3] || 0);
+        l2 = Math.max(l2, pad.buttons[6] ? pad.buttons[6].value : 0);
+        r2 = Math.max(r2, pad.buttons[7] ? pad.buttons[7].value : 0);
       }
     }
 
-    // Keyboard mirror (WASD = left stick, arrows = right stick). Only when no controller is
-    // connected: on Android the DS4's D-pad and face buttons also arrive as arrow/Enter/Back
-    // key events, which would otherwise double up as camera input.
-    if (!pad) {
+    // Keyboard mirror (WASD = left stick, arrows = right stick). Always merged: in the Android
+    // app gamepad keys are consumed natively and never reach the page, so any key events here
+    // come from a real keyboard or the TV remote.
+    {
       const kx = (key('KeyD') ? 1 : 0) - (key('KeyA') ? 1 : 0);
       const ky = (key('KeyS') ? 1 : 0) - (key('KeyW') ? 1 : 0);
       const cx = (key('ArrowRight') ? 1 : 0) - (key('ArrowLeft') ? 1 : 0);
       const cy = (key('ArrowDown') ? 1 : 0) - (key('ArrowUp') ? 1 : 0);
       if (kx || ky) { const m = Math.hypot(kx, ky); lx = kx / m; ly = ky / m; }
       if (cx || cy) { const m = Math.hypot(cx, cy); rx = cx / m; ry = cy / m; }
+      for (const name in KEYS) if (KEYS[name].some((c) => keys.has(c)) && !raw[name]) state.lastButton = name;
       for (const name in KEYS) if (key(...KEYS[name])) raw[name] = true;
       if (raw.l2 && l2 < 1 && key(...KEYS.l2)) l2 = 1;
       if (raw.r2 && r2 < 1 && key(...KEYS.r2)) r2 = 1;
     }
-    state.usingKeyboard = anyKeySeen && !pad;
+    state.usingKeyboard = anyKeySeen && !state.connected;
 
     radialDeadzone(lx, ly, state, 'l');
     radialDeadzone(rx, ry, state, 'r');
@@ -123,6 +151,7 @@ export function createInput() {
     raw.l2 = raw.l2 || l2 > TRIGGER_THRESHOLD;
     raw.r2 = raw.r2 || r2 > TRIGGER_THRESHOLD;
 
+    if (!native) for (const b of BUTTONS) if (raw[b] && !state.down[b]) state.lastButton = b;
     for (const b of BUTTONS) {
       const was = state.down[b];
       state.pressed[b] = raw[b] && !was;
@@ -134,6 +163,7 @@ export function createInput() {
 
   /** DualShock rumble. strong = left (heavy) motor, weak = right (buzzy) motor, both 0..1. */
   function rumble(strong, weak, ms) {
+    if (bridge && typeof bridge.rumble === 'function') { try { bridge.rumble(strong, weak, ms); } catch { /* best effort */ } }
     const pad = activePad();
     const act = pad && pad.vibrationActuator;
     if (!act || !act.playEffect) return;
@@ -143,7 +173,7 @@ export function createInput() {
   }
 
   /** True once the player has touched anything (browsers hide pads until a button press). */
-  const anyInput = () => state.connected || anyKeySeen;
+  const anyInput = () => state.connected || anyKeySeen || !!bridge;
 
   return { state, poll, rumble, anyInput };
 }
