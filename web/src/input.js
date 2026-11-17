@@ -101,16 +101,20 @@ export function createInput() {
       }
     }
 
-    // Keyboard mirror (WASD = left stick, arrows = right stick).
-    const kx = (key('KeyD') ? 1 : 0) - (key('KeyA') ? 1 : 0);
-    const ky = (key('KeyS') ? 1 : 0) - (key('KeyW') ? 1 : 0);
-    const cx = (key('ArrowRight') ? 1 : 0) - (key('ArrowLeft') ? 1 : 0);
-    const cy = (key('ArrowDown') ? 1 : 0) - (key('ArrowUp') ? 1 : 0);
-    if (kx || ky) { const m = Math.hypot(kx, ky); lx = kx / m; ly = ky / m; }
-    if (cx || cy) { const m = Math.hypot(cx, cy); rx = cx / m; ry = cy / m; }
-    for (const name in KEYS) if (key(...KEYS[name])) raw[name] = true;
-    if (raw.l2 && l2 < 1 && key(...KEYS.l2)) l2 = 1;
-    if (raw.r2 && r2 < 1 && key(...KEYS.r2)) r2 = 1;
+    // Keyboard mirror (WASD = left stick, arrows = right stick). Only when no controller is
+    // connected: on Android the DS4's D-pad and face buttons also arrive as arrow/Enter/Back
+    // key events, which would otherwise double up as camera input.
+    if (!pad) {
+      const kx = (key('KeyD') ? 1 : 0) - (key('KeyA') ? 1 : 0);
+      const ky = (key('KeyS') ? 1 : 0) - (key('KeyW') ? 1 : 0);
+      const cx = (key('ArrowRight') ? 1 : 0) - (key('ArrowLeft') ? 1 : 0);
+      const cy = (key('ArrowDown') ? 1 : 0) - (key('ArrowUp') ? 1 : 0);
+      if (kx || ky) { const m = Math.hypot(kx, ky); lx = kx / m; ly = ky / m; }
+      if (cx || cy) { const m = Math.hypot(cx, cy); rx = cx / m; ry = cy / m; }
+      for (const name in KEYS) if (key(...KEYS[name])) raw[name] = true;
+      if (raw.l2 && l2 < 1 && key(...KEYS.l2)) l2 = 1;
+      if (raw.r2 && r2 < 1 && key(...KEYS.r2)) r2 = 1;
+    }
     state.usingKeyboard = anyKeySeen && !pad;
 
     radialDeadzone(lx, ly, state, 'l');
