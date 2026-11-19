@@ -111,10 +111,12 @@ export function createHud() {
     if (d.bridge) {
       const mapped = d.lastMapped && d.lastMapped.length ? d.lastMapped.map((b) => PT_NAMES[b] || b).join(' ') : 'nothing';
       info = `${d.name || 'No controller found'}${d.ids ? ` · ${d.ids}` : ''} · ${d.layout}\n`
-        + `Button events ${d.keyEvents} · stick events ${d.motionEvents}`
-        + (d.otherMotion ? ` · pointer events ${d.otherMotion}` : '')
-        + (d.pointerMoves ? ` · page pointer ${d.pointerMoves}` : '')
-        + (d.lastKey > 0 ? ` · last button ${d.lastKey} ${d.lastKeyName} → ${mapped}` : '');
+        + `Button events ${d.keyEvents} · stick events ${d.motionEvents} · pointer events ${d.pointerEvents}`
+        + (d.otherEvents ? ` · other ${d.otherEvents}` : '') + (d.pointerMoves ? ` · page pointer ${d.pointerMoves}` : '')
+        + (d.lastKey > 0 ? `\nLast button ${d.lastKey} ${d.lastKeyName} → ${mapped}` : '')
+        + (d.lastStick ? `\nLast stick event: ${d.lastStick}` : '')
+        + (d.lastPointer ? `\nLast pointer event: ${d.lastPointer}` : '')
+        + (d.devices && d.devices.length ? `\nDevices: ${d.devices.slice(0, 4).join(' · ')}` : '');
       rawLine = d.axes.map((a) => `${a.name}${a.role ? '=' + a.role : ''}${fmt(a.value)}`).join('  ');
     } else {
       info = `${d.name ? d.name + ' · ' : ''}${d.layout || 'no controller'}`;

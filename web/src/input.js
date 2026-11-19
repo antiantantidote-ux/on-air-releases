@@ -168,7 +168,7 @@ const triggerValue = (axes, t) => {
 function readBridge(bridge) {
   let s;
   try { s = String(bridge.state()); } catch { return null; }
-  const [keysPart, axesPart, counts, lasts, devPart, lastName] = s.split('|');
+  const [keysPart, axesPart, counts, lastKeyPart, devPart, lastName, lastStick, lastPointer] = s.split('|');
   const down = new Set();
   if (keysPart) for (const k of keysPart.split(',')) down.add(Number(k));
   const axes = new Map();
@@ -176,10 +176,11 @@ function readBridge(bridge) {
     const i = kv.indexOf(':');
     if (i > 0) axes.set(Number(kv.slice(0, i)), Number(kv.slice(i + 1)) / 1000);
   }
-  const [keyEvents = 0, motionEvents = 0, otherMotion = 0] = (counts || '').split(',').map(Number);
-  const [lastKey = -1, motionSource = 0, otherSource = 0] = (lasts || '').split(',').map(Number);
+  const [keyEvents = 0, motionEvents = 0, pointerEvents = 0, otherEvents = 0] = (counts || '').split(',').map(Number);
+  const lastKey = Number((lastKeyPart || '-1').split(',')[0]);
   const [deviceId = -1, deviceVersion = 0, padCount = 0] = (devPart || '').split(',').map(Number);
-  return { down, axes, keyEvents, motionEvents, otherMotion, lastKey, motionSource, otherSource, deviceId, deviceVersion, padCount, lastKeyName: lastName || '' };
+  return { down, axes, keyEvents, motionEvents, pointerEvents, otherEvents, lastKey, deviceId, deviceVersion, padCount,
+    lastKeyName: lastName || '', lastStick: lastStick || '', lastPointer: lastPointer || '' };
 }
 
 const WIZARD_STEPS = [
@@ -255,14 +256,23 @@ export function createInput() {
   const bigger = (a, b) => (Math.abs(b) > Math.abs(a) ? b : a);
 
   // --- native controller description and mapping ---------------------------------------------
-  let device = null, deviceVersion = -1, profile = null, pinned = 0, lastSeenKey = -1;
+  let device = null, deviceVersion = -1, profile = null, pinned = 0, lastSeenKey = -1, deviceList = [];
   const signature = (d) => `edp.pad.${d.vendor || 0}:${d.product || 0}:${d.name || ''}`;
 
   function refreshDevice(nat) {
     if (nat.deviceVersion === deviceVersion) return;
     deviceVersion = nat.deviceVersion;
-    try { device = JSON.parse(String(bridge.device())); } catch { device = null; }
-    if (!device || device.id === undefined) { device = null; profile = null; return; }
+    let desc = null;
+    try { desc = JSON.parse(String(bridge.device())); } catch { desc = null; }
+    deviceList = desc && Array.isArray(desc.devices) ? desc.devices : [];
+    if (!desc || desc.id === undefined) {
+      // No description: still map the standard layout, so a controller Android did not
+      // describe keeps working.
+      device = null;
+      profile = buildProfile({}, null);
+      return;
+    }
+    device = desc;
     let calib = null;
     try { calib = JSON.parse(storageGet(signature(device)) || 'null'); } catch { calib = null; }
     profile = buildProfile(device, calib);
@@ -508,8 +518,11 @@ export function createInput() {
         ids: device ? `${(device.vendor || 0).toString(16).padStart(4, '0')}:${(device.product || 0).toString(16).padStart(4, '0')}` : '',
         layout: profile ? profile.label + (profile.swapped ? ' · sticks auto-fixed' : '') : 'no controller',
         calibrated: !!(profile && profile.calibrated),
-        keyEvents: nat.keyEvents, motionEvents: nat.motionEvents, otherMotion: nat.otherMotion,
-        motionSource: nat.motionSource, otherSource: nat.otherSource,
+        keyEvents: nat.keyEvents, motionEvents: nat.motionEvents, pointerEvents: nat.pointerEvents, otherEvents: nat.otherEvents,
+        lastStick: nat.lastStick, lastPointer: nat.lastPointer,
+        // Only input devices that could matter: gamepads, joysticks, mice and touchpads.
+        devices: deviceList.filter((d) => d.name && (parseInt(d.sources, 16) & (0x400 | 0x1000000 | 0x2000 | 0x100000)))
+          .map((d) => `${d.name} (${d.sources}${d.virtual ? ', virtual' : ''})`),
         lastKey: lastSeenKey, lastKeyName: nat.lastKeyName, lastMapped: mappedTo,
         // The axes this controller has, plus any that are in use or moving.
         axes: [...nat.axes].filter(([a, v]) => roles[a] || Math.abs(v) > 0.02 || (device && (device.axes || []).some((r) => r.axis === a)))

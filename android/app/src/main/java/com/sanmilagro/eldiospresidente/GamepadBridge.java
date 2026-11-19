@@ -18,6 +18,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Raw controller pipe from Android to the game.
@@ -25,12 +27,15 @@ import java.util.Arrays;
  * Android TV WebViews list a connected gamepad through the W3C Gamepad API but often never
  * deliver its events, so MainActivity feeds every controller KeyEvent and MotionEvent in here
  * instead. This class does not decide what anything means: it reports which Android key codes
- * are held and the value of every joystick axis, plus a description of the controller. The game
- * (web/src/input.js) maps those to buttons and sticks, because different Android builds lay the
- * DualShock 4 out differently (Sony key layout files, Generic.kl, old and new kernel drivers).
+ * are held and the value of every joystick axis, plus a description of the controller(s). The
+ * game (web/src/input.js) maps those to buttons and sticks, because different Android builds lay
+ * the DualShock 4 out differently (Sony key layout files, Generic.kl, old and new kernel drivers).
+ *
+ * Sticks are accepted from any joystick-class event, whichever input node sends them: some
+ * Android builds split one physical controller into several devices.
  *
  * The game polls {@code window.AndroidPad.state()} once per frame and calls
- * {@code window.AndroidPad.device()} when the controller changes.
+ * {@code window.AndroidPad.device()} when the description changes.
  */
 public class GamepadBridge implements InputManager.InputDeviceListener {
     private static final int MAX_KEY = 512;
@@ -54,14 +59,15 @@ public class GamepadBridge implements InputManager.InputDeviceListener {
     private final boolean[] down = new boolean[MAX_KEY];
     private final float[] axes = new float[MAX_AXIS];
     private final boolean[] reported = new boolean[MAX_AXIS];
-    private int activeId = -1;
-    private boolean activeHasButtons;
+    private final Set<Integer> knownPads = new HashSet<>();
+    private int primaryId = -1;
     private int deviceVersion;
     private String deviceJson = "{}";
-    private int padCount;
-    private long keyEvents, motionEvents, otherMotion;
-    private int lastKey = -1, lastMotionSource, lastOtherSource;
+    private long keyEvents, stickEvents, pointerEvents, otherEvents;
+    private int lastKey = -1;
     private String lastKeyName = "";
+    /** One line describing the most recent motion event of each kind, for the diagnostics panel. */
+    private String lastStick = "", lastPointer = "";
 
     GamepadBridge(Context context) {
         inputManager = (InputManager) context.getSystemService(Context.INPUT_SERVICE);
@@ -81,8 +87,9 @@ public class GamepadBridge implements InputManager.InputDeviceListener {
         Arrays.fill(axes, 0f);
     }
 
+    /** Any device with gamepad buttons or joystick axes, including ones Android marks virtual. */
     private static boolean isPad(InputDevice dev) {
-        if (dev == null || dev.isVirtual()) return false;
+        if (dev == null) return false;
         int s = dev.getSources();
         return (s & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
                 || (s & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK;
@@ -90,6 +97,15 @@ public class GamepadBridge implements InputManager.InputDeviceListener {
 
     private static boolean hasButtons(InputDevice dev) {
         return dev != null && (dev.getSources() & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD;
+    }
+
+    /** Preference for naming the controller: real with buttons, then any with buttons, then the rest. */
+    private static int rank(InputDevice d) { return (hasButtons(d) ? 2 : 0) + (d.isVirtual() ? 0 : 1); }
+
+    private static String describe(MotionEvent e) {
+        InputDevice d = e.getDevice();
+        return "0x" + Integer.toHexString(e.getSource()) + " " + MotionEvent.actionToString(e.getActionMasked())
+                + " from " + (d != null ? d.getName() : "device " + e.getDeviceId());
     }
 
     /** Returns true if the event came from a controller and was consumed. */
@@ -124,28 +140,28 @@ public class GamepadBridge implements InputManager.InputDeviceListener {
             }
         }
         keyEvents++;
-        if (dev != null && dev.getId() != activeId && isPad(dev)) select(dev);
+        if (isPad(dev) && !knownPads.contains(dev.getId())) rescan();
         // Consumed even if unmapped, so Android cannot turn Circle into BACK or the D-pad into focus moves.
         return true;
     }
 
-    /** Returns true if the event came from a controller stick, trigger or hat and was consumed. */
+    /** Returns true if the event was a stick, trigger or hat movement and was consumed. */
     synchronized boolean onMotion(MotionEvent event) {
         int source = event.getSource();
-        InputDevice dev = event.getDevice();
-        if ((source & InputDevice.SOURCE_CLASS_JOYSTICK) == 0) {
-            // Pointer-style events from a controller (the DS4 touchpad, a TV "mouse mode") are
-            // counted for the diagnostics panel and left for the page.
-            if (isPad(dev)) { otherMotion++; lastOtherSource = source; }
+        boolean joystick = (source & InputDevice.SOURCE_CLASS_JOYSTICK) != 0;
+        boolean pointer = (source & (InputDevice.SOURCE_CLASS_POINTER | InputDevice.SOURCE_CLASS_POSITION)) != 0;
+        // Sticks normally arrive as joystick-class events; also accept any non-pointer motion from
+        // a controller, in case a TV build labels them differently.
+        if (!joystick && (pointer || !isPad(event.getDevice()))) {
+            // Not a stick. Count it for the diagnostics panel (a TV "mouse mode" shows up here)
+            // and leave it for the page.
+            if (pointer) { pointerEvents++; lastPointer = describe(event); } else { otherEvents++; }
             return false;
         }
-        motionEvents++;
-        lastMotionSource = source;
-        if (dev != null && dev.getId() != activeId) {
-            // A button-less joystick node (e.g. a motion-sensor device) must not hijack the sticks.
-            if (activeHasButtons && !hasButtons(dev)) return true;
-            select(dev);
-        }
+        stickEvents++;
+        lastStick = describe(event);
+        InputDevice dev = event.getDevice();
+        if (isPad(dev) && !knownPads.contains(dev.getId())) rescan();
         for (int a = 0; a < MAX_AXIS; a++) {
             if (reported[a]) axes[a] = event.getAxisValue(a);
         }
@@ -158,84 +174,85 @@ public class GamepadBridge implements InputManager.InputDeviceListener {
 
     private static double finite(float v) { return Float.isNaN(v) || Float.isInfinite(v) ? 0 : v; }
 
-    private void select(InputDevice dev) {
-        activeId = dev.getId();
-        activeHasButtons = hasButtons(dev);
+    /**
+     * Rebuild the controller description from every connected controller: the primary one (with
+     * buttons) names it, and the axes and keys of all of them are merged, so a controller that
+     * Android splits into several input devices still works.
+     */
+    private synchronized void rescan() {
+        knownPads.clear();
         Arrays.fill(reported, false);
-        Arrays.fill(axes, 0f);
         for (int a : COMMON_AXES) reported[a] = true;
+        InputDevice primary = null;
         JSONObject o = new JSONObject();
+        JSONArray ranges = new JSONArray();
+        JSONArray devices = new JSONArray();
+        Set<Integer> rangeAxes = new HashSet<>();
+        Set<Integer> keys = new HashSet<>();
         try {
-            o.put("id", dev.getId());
-            o.put("name", dev.getName());
-            o.put("vendor", dev.getVendorId());
-            o.put("product", dev.getProductId());
-            o.put("sources", dev.getSources());
-            o.put("android", Build.VERSION.SDK_INT);
-            JSONArray ranges = new JSONArray();
-            for (InputDevice.MotionRange r : dev.getMotionRanges()) {
-                if ((r.getSource() & InputDevice.SOURCE_CLASS_JOYSTICK) == 0) continue;
-                int a = r.getAxis();
-                if (a >= 0 && a < MAX_AXIS) reported[a] = true;
-                JSONObject j = new JSONObject();
-                j.put("axis", a);
-                j.put("name", axisName(a));
-                j.put("min", finite(r.getMin()));
-                j.put("max", finite(r.getMax()));
-                j.put("flat", finite(r.getFlat()));
-                ranges.put(j);
+            for (int id : inputManager.getInputDeviceIds()) {
+                InputDevice d = inputManager.getInputDevice(id);
+                if (d == null) continue;
+                JSONObject info = new JSONObject();
+                info.put("name", d.getName());
+                info.put("sources", "0x" + Integer.toHexString(d.getSources()));
+                info.put("virtual", d.isVirtual());
+                devices.put(info);
+                if (!isPad(d)) continue;
+                knownPads.add(id);
+                if (primary == null || rank(d) > rank(primary)) primary = d;
+                for (InputDevice.MotionRange r : d.getMotionRanges()) {
+                    if ((r.getSource() & InputDevice.SOURCE_CLASS_JOYSTICK) == 0) continue;
+                    int a = r.getAxis();
+                    if (a < 0 || a >= MAX_AXIS || !rangeAxes.add(a)) continue;
+                    reported[a] = true;
+                    JSONObject j = new JSONObject();
+                    j.put("axis", a);
+                    j.put("name", axisName(a));
+                    j.put("min", finite(r.getMin()));
+                    j.put("max", finite(r.getMax()));
+                    j.put("flat", finite(r.getFlat()));
+                    ranges.put(j);
+                }
+                boolean[] has = d.hasKeys(PROBE_KEYS);
+                for (int i = 0; i < PROBE_KEYS.length; i++) if (has[i]) keys.add(PROBE_KEYS[i]);
             }
-            o.put("axes", ranges);
-            boolean[] has = dev.hasKeys(PROBE_KEYS);
-            JSONArray keys = new JSONArray();
-            for (int i = 0; i < PROBE_KEYS.length; i++) if (has[i]) keys.put(PROBE_KEYS[i]);
-            o.put("keys", keys);
+            if (primary != null) {
+                o.put("id", primary.getId());
+                o.put("name", primary.getName());
+                o.put("vendor", primary.getVendorId());
+                o.put("product", primary.getProductId());
+                o.put("sources", primary.getSources());
+                o.put("pads", knownPads.size());
+                o.put("android", Build.VERSION.SDK_INT);
+                o.put("axes", ranges);
+                JSONArray k = new JSONArray();
+                for (int code : keys) k.put(code);
+                o.put("keys", k);
+            }
+            o.put("devices", devices);
         } catch (JSONException ignored) {
             // A partial description is still useful.
         }
+        int newPrimary = primary != null ? primary.getId() : -1;
+        if (newPrimary != primaryId) { Arrays.fill(down, false); Arrays.fill(axes, 0f); }
+        primaryId = newPrimary;
         deviceJson = o.toString();
         deviceVersion++;
     }
 
-    private synchronized void rescan() {
-        int count = 0;
-        boolean activeAlive = false;
-        InputDevice best = null;
-        for (int id : inputManager.getInputDeviceIds()) {
-            InputDevice d = inputManager.getInputDevice(id);
-            if (!isPad(d)) continue;
-            count++;
-            if (id == activeId) activeAlive = true;
-            if (best == null || (hasButtons(d) && !hasButtons(best))) best = d;
-        }
-        padCount = count;
-        if (!activeAlive) {
-            activeId = -1;
-            activeHasButtons = false;
-            deviceJson = "{}";
-            deviceVersion++;
-            Arrays.fill(down, false);
-            Arrays.fill(axes, 0f);
-            Arrays.fill(reported, false);
-            if (best != null) select(best);
-        }
-    }
-
     @Override public void onInputDeviceAdded(int id) { rescan(); }
     @Override public void onInputDeviceRemoved(int id) { rescan(); }
-    @Override public synchronized void onInputDeviceChanged(int id) {
-        InputDevice d = inputManager.getInputDevice(id);
-        if (id == activeId && isPad(d)) select(d); else rescan();
-    }
+    @Override public void onInputDeviceChanged(int id) { rescan(); }
 
     /**
-     * One snapshot, as a compact string of six '|'-separated fields:
-     * held key codes (comma list) | axis:value*1000 pairs | keyEvents,motionEvents,otherMotion |
-     * lastKey,lastMotionSource,lastOtherSource | deviceId,deviceVersion,padCount | lastKeyName
+     * One snapshot, as a compact string of '|'-separated fields:
+     * held key codes (comma list) | axis:value*1000 pairs | keyEvents,stickEvents,pointerEvents,otherEvents |
+     * lastKey | primaryId,deviceVersion,padCount | lastKeyName | lastStick | lastPointer
      */
     @JavascriptInterface
     public synchronized String state() {
-        StringBuilder sb = new StringBuilder(200);
+        StringBuilder sb = new StringBuilder(256);
         boolean first = true;
         for (int k = 1; k < MAX_KEY; k++) {
             if (!down[k]) continue;
@@ -251,14 +268,16 @@ public class GamepadBridge implements InputManager.InputDeviceListener {
             sb.append(a).append(':').append(Math.round(axes[a] * 1000f));
             first = false;
         }
-        sb.append('|').append(keyEvents).append(',').append(motionEvents).append(',').append(otherMotion);
-        sb.append('|').append(lastKey).append(',').append(lastMotionSource).append(',').append(lastOtherSource);
-        sb.append('|').append(activeId).append(',').append(deviceVersion).append(',').append(padCount);
+        sb.append('|').append(keyEvents).append(',').append(stickEvents).append(',').append(pointerEvents).append(',').append(otherEvents);
+        sb.append('|').append(lastKey);
+        sb.append('|').append(primaryId).append(',').append(deviceVersion).append(',').append(knownPads.size());
         sb.append('|').append(lastKeyName);
+        sb.append('|').append(lastStick.replace('|', ' '));
+        sb.append('|').append(lastPointer.replace('|', ' '));
         return sb.toString();
     }
 
-    /** JSON description of the active controller: name, ids, joystick axes with ranges, key codes it can produce. */
+    /** JSON description of the controller(s): name, ids, joystick axes with ranges, key codes, and every input device. */
     @JavascriptInterface
     public synchronized String device() { return deviceJson; }
 
@@ -267,7 +286,7 @@ public class GamepadBridge implements InputManager.InputDeviceListener {
     public void rumble(float strong, float weak, int ms) {
         try {
             InputDevice dev;
-            synchronized (this) { dev = activeId >= 0 ? inputManager.getInputDevice(activeId) : null; }
+            synchronized (this) { dev = primaryId >= 0 ? inputManager.getInputDevice(primaryId) : null; }
             if (dev == null || ms <= 0) return;
             if (Build.VERSION.SDK_INT >= 31) {
                 VibratorManager vm = dev.getVibratorManager();

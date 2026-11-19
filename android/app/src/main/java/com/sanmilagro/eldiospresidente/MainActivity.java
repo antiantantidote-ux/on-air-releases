@@ -30,6 +30,11 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        // The game never needs the on-screen keyboard. Android offers every input event to the
+        // keyboard service before the app; cutting it out of the path means a TV keyboard service
+        // cannot swallow stick movements (buttons came through, sticks did not).
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
+                WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
 
         // ES modules need an http(s) origin; this serves /assets/* straight from the APK.
         final WebViewAssetLoader assets = new WebViewAssetLoader.Builder()

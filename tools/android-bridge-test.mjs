@@ -125,8 +125,8 @@ async function run(name) {
     };
     window.AndroidPad = {
       state: () => `${[...down].join(',')}|${[...axes].map(([a, v]) => `${a}:${Math.round(v * 1000)}`).join(',')}|`
-        + `${keyEvents},${motionEvents},0|${last},16777232,0|${C.device.id},1,1|KEY_${last}`,
-      device: () => JSON.stringify(C.device),
+        + `${keyEvents},${motionEvents},0,0|${last}|${C.device.id},1,1|KEY_${last}|0x1000010 ACTION_MOVE from ${C.device.name}|`,
+      device: () => JSON.stringify({ ...C.device, devices: [{ name: C.device.name, sources: '0x1000511', virtual: false }] }),
       rumble: () => { window.__rumbles = (window.__rumbles || 0) + 1; },
     };
   }, { setup });

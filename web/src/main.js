@@ -947,7 +947,7 @@ function frame(now) {
       let begin = false;
       if (!w.active) {
         if (pad.holdTime >= input.HOLD_FOR_SETUP && input.canSetUp()) input.startWizard();
-        else if (pad.anyReleased && pad.lastHold < 1.2) begin = true;
+        else if (pad.anyReleased) begin = true; // any release that did not open the set-up
       }
       if (begin) {
         music.start();

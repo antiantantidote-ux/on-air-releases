@@ -109,10 +109,10 @@ body {
 .card .bar-row + .stat { margin-top: 1rem; }
 
 /* ---- title ---- */
-#title { position: absolute; inset: 0; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; background: radial-gradient(circle, rgba(8, 12, 24, 0.25) 0%, rgba(8, 12, 24, 0.78) 85%); }
+#title { position: absolute; inset: 0; display: flex; align-items: flex-start; justify-content: center; padding-top: 10.5vh; background: radial-gradient(circle, rgba(8, 12, 24, 0.25) 0%, rgba(8, 12, 24, 0.78) 85%); }
 .title-box { text-align: center; }
 .kicker { font-size: 1.1rem; letter-spacing: 0.25em; text-transform: uppercase; }
-#title h1 { font-size: 4.6rem; line-height: 0.95; color: var(--gold); letter-spacing: 0.05em; margin: 0.8rem 0 1.2rem; text-shadow: 0 0.3rem 0 #a3271c, 0 0.6rem 1.4rem rgba(0, 0, 0, 0.6); }
+#title h1 { font-size: 3.9rem; line-height: 0.95; color: var(--gold); letter-spacing: 0.05em; margin: 0.8rem 0 1.2rem; text-shadow: 0 0.3rem 0 #a3271c, 0 0.6rem 1.4rem rgba(0, 0, 0, 0.6); }
 #title-status { font-size: 1.3rem; animation: blink 1.6s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: 0.45; } }
 
