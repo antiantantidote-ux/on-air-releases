@@ -81,6 +81,50 @@ export function createHud() {
   };
   hud.inspectOpen = () => !$('inspect').hidden;
 
+  // --- controller test panel ------------------------------------------------------------------
+  const PT_BUTTONS = [['cross', '✕'], ['circle', '○'], ['square', '□'], ['triangle', '△'], ['l1', 'L1'], ['r1', 'R1'],
+    ['l2', 'L2'], ['r2', 'R2'], ['share', 'SHARE'], ['options', 'OPT'], ['l3', 'L3'], ['r3', 'R3'],
+    ['up', '↑'], ['down', '↓'], ['left', '←'], ['right', '→'], ['ps', 'PS']];
+  const PT_NAMES = Object.fromEntries(PT_BUTTONS);
+  let ptBuilt = false, ptPrompt = null;
+  const fmt = (v) => (v >= 0 ? ' ' : '') + v.toFixed(2);
+
+  hud.padTest = (show, pad, wizard, onTitle) => {
+    const el = $('padtest');
+    if (!show) { el.hidden = true; return; }
+    el.classList.toggle('on-title', !!onTitle);
+    if (!ptBuilt) {
+      $('pt-buttons').innerHTML = PT_BUTTONS.map(([b, t]) => `<span data-b="${b}">${t}</span>`).join('');
+      ptBuilt = true;
+    }
+    el.hidden = false;
+    const s = pad.stick;
+    $('pt-ls').style.transform = `translate(${(s.lx * 1.5).toFixed(2)}rem, ${(s.ly * 1.5).toFixed(2)}rem)`;
+    $('pt-rs').style.transform = `translate(${(s.rx * 1.5).toFixed(2)}rem, ${(s.ry * 1.5).toFixed(2)}rem)`;
+    $('pt-l2').style.width = `${Math.round(pad.l2 * 100)}%`;
+    $('pt-r2').style.width = `${Math.round(pad.r2 * 100)}%`;
+    for (const span of $('pt-buttons').children) span.classList.toggle('on', !!pad.down[span.dataset.b]);
+    const prompt = wizard.active ? `<b class="step">${Math.min(wizard.step + 1, wizard.total)}/${wizard.total}</b> ${wizard.prompt}` : '';
+    if (prompt !== ptPrompt) { $('pt-prompt').innerHTML = prompt; $('pt-prompt').hidden = !prompt; ptPrompt = prompt; }
+    const d = pad.diag || {};
+    let info, rawLine;
+    if (d.bridge) {
+      const mapped = d.lastMapped && d.lastMapped.length ? d.lastMapped.map((b) => PT_NAMES[b] || b).join(' ') : 'nothing';
+      info = `${d.name || 'No controller found'}${d.ids ? ` · ${d.ids}` : ''} · ${d.layout}\n`
+        + `Button events ${d.keyEvents} · stick events ${d.motionEvents}`
+        + (d.otherMotion ? ` · pointer events ${d.otherMotion}` : '')
+        + (d.pointerMoves ? ` · page pointer ${d.pointerMoves}` : '')
+        + (d.lastKey > 0 ? ` · last button ${d.lastKey} ${d.lastKeyName} → ${mapped}` : '');
+      rawLine = d.axes.map((a) => `${a.name}${a.role ? '=' + a.role : ''}${fmt(a.value)}`).join('  ');
+    } else {
+      info = `${d.name ? d.name + ' · ' : ''}${d.layout || 'no controller'}`;
+      rawLine = '';
+    }
+    $('pt-info').textContent = info;
+    $('pt-raw').textContent = rawLine;
+    $('pt-raw').hidden = !rawLine;
+  };
+
   hud.showTitle = (show, status) => {
     $('title').hidden = !show;
     if (status && status !== lastTitle) { $('title-status').innerHTML = status; lastTitle = status; }

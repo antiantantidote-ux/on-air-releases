@@ -711,6 +711,7 @@ let snapToCreature = false;
 let choosing = false, pick = 0, stickArmed = true;
 let hoverCreature = false;
 let almanacPage = 0;
+let padTestOpen = false, padTestTimer = 0;
 let last = performance.now();
 let fps = 60, frameMs = 16.7, perfTimer = 0;
 const perf = { calls: 0, triangles: 0 };
@@ -879,6 +880,7 @@ function almanacCards() {
 }
 
 function updateHints() {
+  if (!document.getElementById('title').hidden) return hud.setHints([]); // the title has its own instructions
   if (hud.almanacOpen()) return hud.setHints([['dpad', ['Creature page', 'Politics page', 'Economy page'][almanacPage]], ['options', 'Close']]);
   if (radial.isOpen) return hud.setHints([]);
   if (mode && mode.kind === 'place') return hud.setHints([['cross', `Build ${money(BUILDINGS[mode.type].cost)}`], ['square', 'Rotate'], ['circle', 'Cancel'], ['l2', 'Precision']]);
@@ -929,14 +931,25 @@ function frame(now) {
         hud.advise('penultimo', 'Presidente! Press Triangle for the palace, then hold L1 to build. A sugar plantation near the dock and the pesos will flow.');
       }
     } else if (input.anyInput()) {
-      const anyPress = Object.values(pad.pressed).some(Boolean);
-      // The small diagnostic line tells a tester which input path is alive on their TV.
-      const via = { android: 'Android input', gamepad: 'browser gamepad', keyboard: 'keyboard / remote', none: 'waiting for input' }[pad.source];
-      const diag = `<br><small class="diag">${via}${pad.source === 'android' ? ` · ${pad.nativeEvents} events` : ''}${pad.lastButton ? ` · last button: ${pad.lastButton.toUpperCase()}` : ''}</small>`;
-      hud.showTitle(true, (pad.connected
-        ? 'DualShock 4 connected — press <span class="btn cross">✕</span> to rule'
-        : 'Press <span class="btn cross">✕</span> or <b>Enter</b> to rule') + diag);
-      if (anyPress) {
+      // Tap any button to start; hold one for 3 seconds to run the controller set-up.
+      const w = input.wizard;
+      let status;
+      if (w.active) {
+        status = `Controller set-up · step ${Math.min(w.step + 1, w.total)} of ${w.total}`;
+      } else {
+        status = (pad.connected
+          ? 'DualShock 4 connected — press <span class="btn cross">✕</span> to rule'
+          : 'Press <span class="btn cross">✕</span> or <b>Enter</b> to rule')
+          + (w.message ? ` <span class="ok">· ${w.message}</span>` : '');
+        if (input.canSetUp()) status += '<br><small class="diag">Buttons or sticks wrong? Hold any button for 3 seconds to set up the controller.</small>';
+      }
+      hud.showTitle(true, status);
+      let begin = false;
+      if (!w.active) {
+        if (pad.holdTime >= input.HOLD_FOR_SETUP && input.canSetUp()) input.startWizard();
+        else if (pad.anyReleased && pad.lastHold < 1.2) begin = true;
+      }
+      if (begin) {
         music.start();
         hud.showTitle(false);
         choosing = true;
@@ -968,6 +981,7 @@ function frame(now) {
 
   if (playing) {
     // --- Almanac (Options / touchpad click) --------------------------------------------
+    if (pad.pressed.share) padTestOpen = !padTestOpen; // controller test panel, any time
     if (pad.pressed.options || pad.pressed.touchpad) {
       if (hud.almanacOpen()) hud.almanac(null);
       else { radial.close(); almanacPage = 0; hud.almanac(almanacCards()); }
@@ -1038,6 +1052,13 @@ function frame(now) {
   rig.update(realDt, pad, hand.pos, playing && !menuOpen);
   water.update(simTime, sky.env, rig.focus);
   hud.update(realDt);
+  // Controller test panel: always on the title screen, toggled with SHARE in game.
+  padTestTimer += realDt;
+  if (padTestTimer > 0.1 || input.wizard.active) {
+    padTestTimer = 0;
+    const onTitle = !document.getElementById('title').hidden;
+    hud.padTest(onTitle || padTestOpen, pad, input.wizard, onTitle);
+  }
 
   // Blueprint ghost follows the Hand.
   if (mode && mode.kind === 'place') mode.ghost = buildings.showGhost(mode.type, hand.pos.x, hand.pos.z, mode.rot);

@@ -10,8 +10,8 @@ android {
         applicationId 'com.sanmilagro.eldiospresidente'
         minSdk 24          // Android TV 7.0+; WebView there is the updatable Chromium one
         targetSdk 34
-        versionCode 5
-        versionName '0.4.1'
+        versionCode 6
+        versionName '0.4.2'
     }
 
     // The game itself is the ../web folder, packaged untouched as APK assets.

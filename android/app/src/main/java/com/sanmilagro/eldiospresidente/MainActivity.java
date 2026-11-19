@@ -1,6 +1,7 @@
 package com.sanmilagro.eldiospresidente;
 
 import android.app.Activity;
+import android.content.Context;
 import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -37,7 +38,7 @@ public class MainActivity extends Activity {
 
         gamepad = new GamepadBridge(this);
 
-        webView = new WebView(this);
+        webView = new GameWebView(this, gamepad);
         webView.setBackgroundColor(0xFF0B1020);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -62,6 +63,7 @@ public class MainActivity extends Activity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus) gamepad.clearHeld();
         if (hasFocus) {
             getWindow().getDecorView().setSystemUiVisibility(
                     View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
@@ -87,7 +89,31 @@ public class MainActivity extends Activity {
         return super.dispatchGenericMotionEvent(event);
     }
 
-    @Override protected void onPause() { super.onPause(); webView.onPause(); }
+    /**
+     * Second line of defence: if a TV build routes controller events straight to the focused
+     * view instead of through the Activity, they are caught here. Events the Activity already
+     * consumed never reach the view, so nothing is counted twice.
+     */
+    static class GameWebView extends WebView {
+        private final GamepadBridge pad;
+
+        GameWebView(Context context, GamepadBridge pad) {
+            super(context);
+            this.pad = pad;
+        }
+
+        @Override
+        public boolean dispatchKeyEvent(KeyEvent event) {
+            return pad.onKey(event) || super.dispatchKeyEvent(event);
+        }
+
+        @Override
+        public boolean dispatchGenericMotionEvent(MotionEvent event) {
+            return pad.onMotion(event) || super.dispatchGenericMotionEvent(event);
+        }
+    }
+
+    @Override protected void onPause() { super.onPause(); gamepad.clearHeld(); webView.onPause(); }
     @Override protected void onResume() { super.onResume(); webView.onResume(); }
     @Override protected void onDestroy() { gamepad.release(); webView.destroy(); super.onDestroy(); }
 }

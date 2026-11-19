@@ -53,7 +53,12 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 | ○ | Close card / set down the held object / cancel blueprint or demolish mode. **Over the Creature: slap** |
 | △ | Snap to Palace ↔ Creature |
 | D-pad | ← pause · ↑ 1× · → 2× · ↓ replay advisor alerts |
+| Share | Controller test panel (live sticks, triggers, buttons and the raw values Android reports) |
 | Options / touchpad click | Almanac del Presidente (D-pad ←/→ flips between the economy, the Creature's mind, and politics) |
+
+**If buttons or sticks are wrong on a TV:** on the title screen, hold any button for 3 seconds. A
+14-step set-up asks you to move each stick and press each button, then saves the result for that
+controller. The title screen always shows the controller test panel.
 
 Keyboard mirror for desk debugging: WASD = left stick, arrows = right stick, Space = R2,
 Shift = L2, Q/E = L1/R1, Enter = ✕, F = □, Esc = ○, T = △, 1/2/3/4 = D-pad ←/↑/→/↓, Tab = Options.
@@ -130,6 +135,10 @@ plantains, eat a citizen, smash a building, scare protesters, sleep, play.
 | `hud.js` | Top bar, hints, advisors, inspect card, Almanac |
 
 ## Test
+
+`node tools/android-bridge-test.mjs` simulates the Android TV app's controller bridge under each
+DualShock 4 layout Android may apply (standard, Generic.kl with old and new kernel drivers, an
+unrecognised pad, and one only the set-up can map) and plays through the game with each.
 
 `npm test` (with `npm run dev` running and Playwright installed) boots the game in headless
 Chromium with a simulated DS4 and exercises every Phase 1 control, the draw-call budget and
